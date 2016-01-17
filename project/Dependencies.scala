@@ -14,6 +14,8 @@ object Version {
   val scalaPool     = "0.2.0"
   val scalaLogging  = "3.1.0"
   val logBack       = "1.1.3"
+  val scalaAsync    = "0.9.5"
+  val scalaRx       = "0.25.1"
 }
 
 object Library {
@@ -29,6 +31,8 @@ object Library {
   val scalaPool       = "io.github.andrebeat"        %% "scala-pool"                    % Version.scalaPool
   val scalaLogging    = "com.typesafe.scala-logging" %% "scala-logging"                 % Version.scalaLogging
   val logBack         = "ch.qos.logback"             % "logback-classic"                % Version.logBack
+  val scalaAsync      = "org.scala-lang.modules"     % "scala-async_2.11"               % Version.scalaAsync
+  val scalarx         = "io.reactivex"               %% "rxscala"                       % Version.scalaRx
 }
 
 object Dependencies {
@@ -39,6 +43,8 @@ object Dependencies {
     akkaActor,
     akkaSlf4j,
     scalaPool,
+    scalaAsync,
+    scalarx,
     config,
     scalaLogging,
     logBack,

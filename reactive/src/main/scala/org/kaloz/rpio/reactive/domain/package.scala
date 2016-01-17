@@ -1,5 +1,6 @@
 package org.kaloz.rpio.reactive
 
+import org.kaloz.rpio.reactive.domain.Direction._
 import org.kaloz.rpio.reactive.domain.PinMode._
 import org.kaloz.rpio.reactive.domain.PinValue._
 import org.kaloz.rpio.reactive.domain.PudMode._
@@ -14,6 +15,8 @@ package object domain {
 
     trait Response
 
+    trait Event
+
     trait ProtocolHandler {
       def request(request: Request): Future[Response]
 
@@ -24,13 +27,13 @@ package object domain {
       def apply(pin: Option[Int] = None): ProtocolHandler
     }
 
-    case class ChangeModeRequest(pin: Int, pinMode: PinMode) extends Request
+    case class ChangePinModeRequest(pin: Int, pinMode: PinMode) extends Request
 
-    case class ChangeModeResponse(result: Int) extends Response
+    case class ChangePinModeResponse(result: Int) extends Response
 
-    case class ChangePudRequest(pin: Int, pudMode: PudMode) extends Request
+    case class ChangePudModeRequest(pin: Int, pudMode: PudMode) extends Request
 
-    case class ChangePudResponse(result: Int) extends Response
+    case class ChangePudModeResponse(result: Int) extends Response
 
     case class ReadValueRequest(pin: Int) extends Request
 
@@ -39,6 +42,12 @@ package object domain {
     case class WriteValueRequest(pin: Int, value: PinValue) extends Request
 
     case class WriteValueResponse(result: Int) extends Response
+
+    case class VersionRequest() extends Request
+
+    case class VersionResponse(version: Int) extends Response
+
+    case class PinChangedEvent(pin: Int, direction: Direction, value: PinValue) extends Event
 
   }
 
@@ -62,6 +71,17 @@ package object domain {
 
     case class Pwm(value: Int) extends PinValue
 
+    implicit def intToPinValue(pinValue: Int): PinValue = pinValue match {
+      case 0 => Low
+      case 1 => High
+      case x => Pwm(x)
+    }
+
+    implicit def pinValueToInt(pinValue: PinValue): Int = pinValue match {
+      case Low => 0
+      case High => 1
+      case Pwm(x) => x
+    }
   }
 
   object PudMode {
@@ -73,6 +93,19 @@ package object domain {
     case object PudUp extends PudMode
 
     case object PudDown extends PudMode
+
+  }
+
+  object Direction {
+
+    sealed trait Direction
+
+    case object Rising_Edge extends Direction
+
+    case object Falling_Edge extends Direction
+
+    case object Both extends Direction
+
 
   }
 

@@ -5,68 +5,81 @@ import org.kaloz.rpio.reactive.domain.PinMode._
 import org.kaloz.rpio.reactive.domain.PinValue._
 import org.kaloz.rpio.reactive.domain.PudMode._
 
-import scala.concurrent.{Await, Future}
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.duration._
+import scala.concurrent.{Await, Future}
+import scalaz._
+import Scalaz._
 
-sealed abstract class GpioPin(pin: Int, value: PinValue, mode: PinMode, pudMode: PudMode, default: PinValue)(implicit protocolHandlerFactory: ProtocolHandlerFactory) {
+object GpioPin {
+  def apply(pin: Int)(implicit protocolHandlerFactory: ProtocolHandlerFactory): Future[GpioPin] =
+    Future(new GpioPin(pin))
+}
 
-  val protocolHandler = protocolHandlerFactory(Some(pin))
-  Await.ready(Future.sequence(Seq(protocolHandler.request(ChangeModeRequest(pin, mode))
-//    protocolHandler.request(ChangePudRequest(pin, pudMode)),
-//    protocolHandler.request(WriteValueRequest(pin, value))
-  )), 30 second)
+class GpioPin(pin: Int)(implicit protocolHandlerFactory: ProtocolHandlerFactory) {
 
-  def readValue(): Future[ReadValueResponse] = protocolHandler.request(ReadValueRequest(pin)).mapTo[ReadValueResponse]
+  val protocolHandler = protocolHandlerFactory(pin.some)
 
-  def writeValue(value: PinValue): Future[WriteValueResponse] = protocolHandler.request(WriteValueRequest(pin, value)).mapTo[WriteValueResponse]
+  def readValue(): Future[ReadValueResponse] =
+    protocolHandler.request(ReadValueRequest(pin)).mapTo[ReadValueResponse]
 
-  def close(): Future[Unit] = writeValue(default).flatMap(x => protocolHandler.close()).mapTo[Unit]
+  def changePinMode(pinMode: PinMode): Future[ChangePinModeResponse] =
+    protocolHandler.request(ChangePinModeRequest(pin, pinMode)).mapTo[ChangePinModeResponse]
+
+  def changePudMode(pudMode: PudMode): Future[ChangePudModeResponse] =
+    protocolHandler.request(ChangePudModeRequest(pin, pudMode)).mapTo[ChangePudModeResponse]
+
+  def writeValue(value: PinValue): Future[WriteValueResponse] =
+    protocolHandler.request(WriteValueRequest(pin, value)).mapTo[WriteValueResponse]
+
+  def close(): Future[Unit] = protocolHandler.close()
 }
 
 object GpioOutputPin {
   def apply(pin: Int,
             value: PinValue = PinValue.Low,
-            mode: PinMode = PinMode.Output,
-            pudMode: PudMode = PudMode.PudOff,
             default: PinValue = PinValue.Low)
            (implicit protocolHandlerFactory: ProtocolHandlerFactory): Future[GpioOutputPin] = Future {
-    new GpioOutputPin(pin,
-      value,
-      mode,
-      pudMode,
-      default)
+    new GpioOutputPin(pin, value, default)
   }
 }
 
 class GpioOutputPin(pin: Int,
                     value: PinValue,
-                    mode: PinMode,
-                    pudMode: PudMode,
                     default: PinValue)
-                   (implicit protocolHandlerFactory: ProtocolHandlerFactory)
-  extends GpioPin(pin, value, mode, pudMode, default)
+                   (implicit protocolHandlerFactory: ProtocolHandlerFactory) extends GpioPin(pin) {
+
+  Await.ready(
+    Future.sequence(
+      Seq(
+        changePinMode(PinMode.Output),
+        writeValue(value)
+      )
+    ),
+    30 second)
+
+  override def close(): Future[Unit] = writeValue(default).flatMap(_ => super.close())
+}
 
 object GpioInputPin {
   def apply(pin: Int,
-            value: PinValue = PinValue.Low,
-            mode: PinMode = PinMode.Output,
-            pudMode: PudMode = PudMode.PudOff,
-            default: PinValue = PinValue.Low)
+            pudMode: PudMode = PudMode.PudDown)
            (implicit protocolHandlerFactory: ProtocolHandlerFactory): Future[GpioInputPin] = Future {
-    new GpioInputPin(pin,
-      value,
-      mode,
-      pudMode,
-      default)
+    new GpioInputPin(pin, pudMode)
   }
 }
 
 class GpioInputPin(pin: Int,
-                   value: PinValue = PinValue.Low,
-                   mode: PinMode = PinMode.Input,
-                   pudMode: PudMode = PudMode.PudUp,
-                   default: PinValue = PinValue.Low)
-                  (implicit protocolHandlerFactory: ProtocolHandlerFactory)
-  extends GpioPin(pin, value, mode, pudMode, default)
+                   pudMode: PudMode)
+                  (implicit protocolHandlerFactory: ProtocolHandlerFactory) extends GpioPin(pin) {
+
+  Await.ready(
+    Future.sequence(
+      Seq(
+        changePinMode(PinMode.Input),
+        changePudMode(pudMode)
+      )
+    ),
+    30 second)
+}
 

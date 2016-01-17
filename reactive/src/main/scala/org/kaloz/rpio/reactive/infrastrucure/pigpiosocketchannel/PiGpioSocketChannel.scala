@@ -1,29 +1,36 @@
 package org.kaloz.rpio.reactive.infrastrucure.pigpiosocketchannel
 
 import java.net.InetSocketAddress
-import java.nio.{ByteOrder, ByteBuffer}
 import java.nio.channels.SocketChannel
+import java.nio.{ByteBuffer, ByteOrder}
 import java.util.UUID
 
 import com.typesafe.scalalogging.StrictLogging
 import io.github.andrebeat.pool.Pool
-import org.kaloz.rpio.reactive.domain.DomainApi.{ProtocolHandlerFactory, ProtocolHandler, Request, Response}
+import org.kaloz.rpio.reactive.config.Configuration
+import org.kaloz.rpio.reactive.domain.DomainApi._
+import org.kaloz.rpio.reactive.infrastrucure.pigpiosocketchannel.InfrastructureApi.PiGpioSocketChannelRequest
 import org.kaloz.rpio.reactive.infrastrucure.pigpiosocketchannel.InfrastructureApi.PiGpioSocketChannelRequest.domainToInfrastructure
-import org.kaloz.rpio.reactive.infrastrucure.pigpiosocketchannel.InfrastructureApi._
+import org.slf4j.MDC
 
-import scala.concurrent.Future
 import scala.concurrent.ExecutionContext.Implicits.global
+import scala.concurrent.Future
+import scala.concurrent.duration._
+import scalaz._
+import Scalaz._
 
 object PiGpioSocketChannel extends ProtocolHandlerFactory {
   def apply(pin: Option[Int] = None): ProtocolHandler = new PiGpioSocketChannel(pin)
 }
 
-class PiGpioSocketChannel(pin: Option[Int] = None) extends ProtocolHandler with StrictLogging {
+class PiGpioSocketChannel(pin: Option[Int]) extends ProtocolHandler with StrictLogging with Configuration {
 
-  val pool = Pool[PiGpioSockerChannelPoolObject](capacity = 3,
+  val pool = Pool[PiGpioSockerChannelPoolObject](capacity = pigpio.connectionPoolCapacity,
     factory = () => PiGpioSockerChannelPoolObject()(pin),
-    reset = socketChannelPoolObject => socketChannelPoolObject.clear(),
-    dispose = socketChannelPoolObject => socketChannelPoolObject.close()
+    reset = _.reset(),
+    dispose = _.dispose(),
+    healthCheck = pigpio.connectionPoolHealthcheck.fold(_.healthCheck(), _ => true),
+    maxIdleTime = if (pigpio.connectionPoolMaxIdleInMinute < 0) Duration.Inf else pigpio.connectionPoolMaxIdleInMinute minute
   )
 
   pool.fill()
@@ -34,34 +41,41 @@ class PiGpioSocketChannel(pin: Option[Int] = None) extends ProtocolHandler with 
 }
 
 
-case class PiGpioSockerChannelPoolObject()(implicit pin: Option[Int]) extends StrictLogging {
+case class PiGpioSockerChannelPoolObject()(implicit pin: Option[Int]) extends StrictLogging with Configuration {
 
   implicit val uuid = UUID.randomUUID().toString
-  logger.info(s"Open channel for $pin:$uuid")
+  logger.debug(s"Open channel for $pin:$uuid")
 
   val socketChannel = SocketChannel.open()
-  socketChannel.connect(new InetSocketAddress("192.168.1.239", 8888))
+  socketChannel.connect(new InetSocketAddress(pigpio.serverHost, pigpio.serverPort))
   val writeBuffer: ByteBuffer = ByteBuffer.allocate(16).order(ByteOrder.LITTLE_ENDIAN)
-  logger.info(s"Channel opened for $pin:$uuid")
+  logger.debug(s"Channel opened for $pin:$uuid")
 
-  def sendRequest(request: Request): Future[Response] = Future {
-    logger.info(s"Request - $pin:$uuid:$request")
+  private def sendPiGpioSocketChannelRequest(request: PiGpioSocketChannelRequest): Response = {
 
-    val piGpioSocketChannelRequest: PiGpioSocketChannelRequest = request
-    socketChannel.write(piGpioSocketChannelRequest.fill(writeBuffer))
-    val responseHandler = piGpioSocketChannelRequest.responseHandler
-    socketChannel.read(responseHandler.readBuffer)
-    val response = responseHandler.response
+    MDC.put("uuid", uuid)
+    MDC.put("pin", pin.map(_.toString).getOrElse("N/A"))
 
-    logger.info(s"Response - $pin:$uuid:$request")
+    logger.debug(s"Request - $request")
+    socketChannel.write(request.fill(writeBuffer))
+    val response = request.domainResponse(socketChannel)
+    logger.debug(s"Response - $response")
 
+    MDC.clear()
     response
   }
 
-  def clear() = writeBuffer.clear()
+  def sendRequest(request: Request): Future[Response] = Future(sendPiGpioSocketChannelRequest(request))
 
-  def close() = {
-    logger.info(s"Close channel for $pin:$uuid")
+  def reset() = writeBuffer.clear()
+
+  def healthCheck(): Boolean = {
+    reset()
+    sendPiGpioSocketChannelRequest(VersionRequest()).asInstanceOf[VersionResponse].version > 0
+  }
+
+  def dispose() = {
+    logger.debug(s"Close channel for $pin:$uuid")
     socketChannel.close()
   }
 }
