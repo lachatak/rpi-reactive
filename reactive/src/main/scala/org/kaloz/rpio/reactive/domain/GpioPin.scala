@@ -81,7 +81,7 @@ case class GpioOutputPin(override val pin: Int,
     _ <- super.close()
   } yield {
     subject.onNext(PinClosedEvent(pin))
-    this.copy(closed = true)
+    this.copy(value = default, closed = true)
   }
 
 }
@@ -137,7 +137,7 @@ case class GpioInputPin(override val pin: Int,
           val currentValue = Await.result(readValue(), 30 seconds)
           import PinValue.pinValueToInt
           (lastValue, currentValue) match {
-            case (o, n) if (o == n) => 
+            case (o, n) if (o == n) =>
             case (o, n) if (o < n) =>
               subject.onNext(PinValueChangedEvent(pin, Rising_Edge, currentValue))
             case (o, n) if (o > n) =>
