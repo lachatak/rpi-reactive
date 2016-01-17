@@ -47,7 +47,9 @@ package object domain {
 
     case class VersionResponse(version: Int) extends Response
 
-    case class PinChangedEvent(pin: Int, direction: Direction, value: PinValue) extends Event
+    case class PinValueChangedEvent(pin: Int, direction: Direction, value: PinValue) extends Event
+
+    case class PinClosedEvent(pin: Int) extends Event
 
   }
 
