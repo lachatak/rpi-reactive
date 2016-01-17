@@ -18,9 +18,9 @@ package object domain {
     trait Event
 
     trait ProtocolHandler {
-      def request(request: Request): Future[Response]
+      def request(request: Request): Response
 
-      def close(): Future[Unit]
+      def close(): Unit
     }
 
     trait ProtocolHandlerFactory {

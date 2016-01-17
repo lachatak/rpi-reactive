@@ -47,9 +47,9 @@ class PiGpioSocketChannel(pin: Option[Int]) extends ProtocolHandler with StrictL
 
   pool.fill()
 
-  def request(request: Request): Future[Response] = pool.acquire().use(_.sendRequest(request))
+  def request(request: Request): Response = pool.acquire().use(_.sendRequest(request))
 
-  def close(): Future[Unit] = Future(pool.drain())
+  def close(): Unit = pool.drain()
 }
 
 
@@ -77,7 +77,7 @@ case class PiGpioSockerChannelPoolObject()(implicit pin: Option[Int]) extends St
     response
   }
 
-  def sendRequest(request: Request): Future[Response] = Future(sendPiGpioSocketChannelRequest(request))
+  def sendRequest(request: Request): Response = sendPiGpioSocketChannelRequest(request)
 
   def reset() = writeBuffer.clear()
 
