@@ -6,122 +6,117 @@ import org.kaloz.rpio.reactive.domain.DomainApi._
 import org.kaloz.rpio.reactive.domain.PinMode._
 import org.kaloz.rpio.reactive.domain.PinValue._
 import org.kaloz.rpio.reactive.domain.PudMode._
-import rx.lang.scala.{Observable, Subject}
+import rx.lang.scala.{Subscription, Observable, Subject}
 
 import scala.concurrent.duration._
-import scala.reflect.ClassTag
 import scalaz.Scalaz._
-import scalaz._
 
-sealed abstract class GpioPin(val pinNumber: Int, mode: PinMode, closed: Boolean)(implicit protocolHandler: ProtocolHandler, subject: Subject[Event]) {
+sealed abstract class GpioPin(val pinNumber: Int, val pinMode: PinMode, closed: Boolean)(implicit protocolHandler: ProtocolHandler, subject: Subject[Event]) {
 
   type Self <: GpioPin
 
-  protected def changePinMode(pinMode: PinMode): ChangePinModeResponse =
-    protocolHandler.request(ChangePinModeRequest(pinNumber, pinMode)).asInstanceOf[ChangePinModeResponse]
+  protected def changePinMode(pinMode: PinMode): this.type = {
+    protocolHandler.request(ChangePinModeRequest(pinNumber, pinMode))
+    this
+  }
 
-  def pinMode(): PinMode = mode
-
-  def readValue(): PinValue
+  def value: PinValue
 
   def close(): Self
 
 }
 
 object GpioOutputPin {
-  def create(pinNumber: Int,
-             value: PinValue = PinValue.Low,
-             default: PinValue = PinValue.Low,
-             closed: Boolean = false)
-            (implicit protocolHandlerFactory: ProtocolHandlerFactory, subject: Subject[Event]): GpioOutputPin = {
+  def apply(pinNumber: Int,
+            value: PinValue = PinValue.Low,
+            defaultValue: PinValue = PinValue.Low)
+           (implicit protocolHandlerFactory: ProtocolHandlerFactory, subject: Subject[Event]): GpioOutputPin = {
 
     implicit val protocolHandler = protocolHandlerFactory(pinNumber.some)
 
-    val newPin = new GpioOutputPin(pinNumber, value, default, closed)
-
-    newPin.changePinMode(PinMode.Output)
-    newPin.writeValue(value)
-
-    newPin
+    new GpioOutputPin(pinNumber, value, defaultValue)
   }
 }
 
-case class GpioOutputPin(override val pinNumber: Int,
-                         value: PinValue,
-                         default: PinValue,
-                         closed: Boolean)
-                        (implicit protocolHandler: ProtocolHandler, subject: Subject[Event]) extends GpioPin(pinNumber, PinMode.Output, closed) {
+case class GpioOutputPin private(override val pinNumber: Int,
+                                 value: PinValue,
+                                 defaultValue: PinValue,
+                                 closed: Boolean)
+                                (implicit protocolHandler: ProtocolHandler, subject: Subject[Event]) extends GpioPin(pinNumber, PinMode.Output, closed) {
+
+  private def this(pinNumber: Int, value: PinValue, default: PinValue)(implicit protocolHandler: ProtocolHandler, subject: Subject[Event]) {
+    this(pinNumber, value, default, false)
+    changePinMode(PinMode.Output).writeValue(value)
+  }
 
   type Self = GpioOutputPin
 
-  def readValue(): PinValue = value
-
   def writeValue(newValue: PinValue): GpioOutputPin = {
-    protocolHandler.request(WriteValueRequest(pinNumber, newValue)).asInstanceOf[WriteValueResponse]
+    protocolHandler.request(WriteValueRequest(pinNumber, newValue))
     import PinValue.pinValueToInt
     (value, newValue) match {
       case (o, n) if (o == n) => this
       case (o, n) if (o < n) =>
         subject.onNext(PinValueChangedEvent(pinNumber, Rising_Edge, newValue))
-        this.copy(value = newValue)
+        copy(value = newValue)
       case (o, n) if (o > n) =>
         subject.onNext(PinValueChangedEvent(pinNumber, Falling_Edge, newValue))
-        this.copy(value = newValue)
+        copy(value = newValue)
     }
   }
 
   def close() = {
-    writeValue(default)
+    writeValue(defaultValue)
     protocolHandler.close()
     subject.onNext(PinClosedEvent(pinNumber))
-    copy(value = default, closed = true)
+    copy(value = defaultValue, closed = true)
   }
 
 }
 
 object GpioInputPin {
-  def create(pinNumber: Int,
-             pudMode: PudMode = PudMode.PudDown,
-             closed: Boolean = false)
-            (implicit protocolHandlerFactory: ProtocolHandlerFactory, subject: Subject[Event]): GpioInputPin = {
+  def apply(pinNumber: Int,
+            pudMode: PudMode = PudMode.PudDown)
+           (implicit protocolHandlerFactory: ProtocolHandlerFactory, subject: Subject[Event]): GpioInputPin = {
 
     implicit val protocolHandler = protocolHandlerFactory(pinNumber.some)
 
-    val newPin = new GpioInputPin(pinNumber, pudMode, closed)
-
-    newPin.changePinMode(PinMode.Input)
-    newPin.changePudMode(pudMode)
-    newPin.changeListener()
-
-    newPin
+    new GpioInputPin(pinNumber, pudMode).initChangeListener()
   }
 }
 
-case class GpioInputPin(override val pinNumber: Int,
-                        pud: PudMode = PudDown,
-                        closed: Boolean = false)
-                       (implicit protocolHandler: ProtocolHandler, subject: Subject[Event]) extends GpioPin(pinNumber, PinMode.Input, closed) with Configuration {
+case class GpioInputPin private(override val pinNumber: Int,
+                                pudMode: PudMode,
+                                closed: Boolean,
+                                subscription: Option[Subscription])
+                               (implicit protocolHandler: ProtocolHandler, subject: Subject[Event]) extends GpioPin(pinNumber, PinMode.Input, closed) with Configuration {
 
   type Self = GpioInputPin
 
-  private def changePudMode(pudMode: PudMode): ChangePudModeResponse =
-    protocolHandler.request(ChangePudModeRequest(pinNumber, pudMode)).asInstanceOf[ChangePudModeResponse]
+  private def this(pinNumber: Int, pudMode: PudMode)(implicit protocolHandler: ProtocolHandler, subject: Subject[Event]) {
+    this(pinNumber, pudMode, false, None)
+    changePinMode(PinMode.Input).changePudMode(pudMode)
+  }
 
-  def pudMode() = pud
+  private def changePudMode(pudMode: PudMode): this.type = {
+    protocolHandler.request(ChangePudModeRequest(pinNumber, pudMode))
+    this
+  }
 
-  def readValue(): PinValue = protocolHandler.request(ReadValueRequest(pinNumber)).asInstanceOf[ReadValueResponse].value
+  def value: PinValue = protocolHandler.request(ReadValueRequest(pinNumber)).asInstanceOf[ReadValueResponse].value
 
   def close() = {
     protocolHandler.close()
     subject.onNext(PinClosedEvent(pinNumber))
-    copy(closed = true)
+    subscription.foreach(_.unsubscribe())
+    copy(closed = true, subscription = None)
   }
 
-  def changeListener(): Unit = {
-    var lastValue = readValue()
+  def initChangeListener(): GpioInputPin = {
+    var lastValue = value
     val intervals = Observable.interval(observablePin.refreshInterval millisecond)
-    intervals.subscribe(next => {
-      val currentValue = readValue()
+    val subscription = intervals.subscribe(next => {
+      val currentValue = value
       import PinValue.pinValueToInt
       (lastValue, currentValue) match {
         case (o, n) if (o == n) =>
@@ -132,100 +127,6 @@ case class GpioInputPin(override val pinNumber: Int,
       }
       lastValue = currentValue
     })
+    copy(subscription = subscription.some)
   }
-}
-
-object GpioBoard {
-
-  def provisionGpioOutputPin(pinNumber: Int,
-                             value: PinValue = PinValue.Low,
-                             default: PinValue = PinValue.Low) = modify[GpioBoard] { gpioBoard =>
-    gpioBoard.provisionGpioOutputPin(pinNumber, value, default)
-  }
-
-  def provisionGpioPwmOutputPin(pinNumber: Int,
-                                value: PinValue = Pwm(0),
-                                default: PinValue = Pwm(0)) = modify[GpioBoard] { gpioBoard =>
-    gpioBoard.provisionGpioOutputPin(pinNumber, value, default)
-  }
-
-  def provisionDefaultGpioOutputPins(pinNumbers: Int*) = modify[GpioBoard] { gpioBoard =>
-    gpioBoard.provisionDefaultGpioPins[GpioOutputPin](pinNumbers: _*)
-  }
-
-  def provisionGpioInputPin(pinNumber: Int, pudMode: PudMode = PudMode.PudDown) = modify[GpioBoard] { gpioBoard =>
-    gpioBoard.provisionGpioInputPin(pinNumber, pudMode)
-  }
-
-  def provisionDefaultGpioInputPins(pinNumbers: Int*) = modify[GpioBoard] { gpioBoard =>
-    gpioBoard.provisionDefaultGpioPins[GpioInputPin](pinNumbers: _*)
-  }
-
-  def writeValue(pinNumber: Int, newValue: PinValue) = modify[GpioBoard] { gpioBoard =>
-    gpioBoard.writeValue(pinNumber, newValue)
-  }
-
-  def shutdown() = modify[GpioBoard] { gpioBoard =>
-    gpioBoard.shutdown()
-  }
-}
-
-case class GpioBoard(pins: Map[Int, GpioPin] = Map.empty, pwmCapablePins: Set[Int] = Set(12))(implicit protocolHandlerFactory: ProtocolHandlerFactory, subject: Subject[Event]) {
-
-  def provisionGpioOutputPin(pinNumber: Int,
-                             value: PinValue = PinValue.Low,
-                             default: PinValue = PinValue.Low): GpioBoard =
-    pins.values.find(_.pinNumber == pinNumber) match {
-      case None =>
-        val newPin = GpioOutputPin.create(pinNumber, value, default)
-        subject.onNext(PinProvisionedEvent(pinNumber, PinMode.Output))
-        copy(pins = pins + (pinNumber -> newPin))
-      case Some(pin) if pin.pinMode() == PinMode.Output => this
-      case Some(pin) => throw new IllegalArgumentException(s"${pinNumber} is already provisioned with different pinMode - ${pin.pinMode()}!!")
-    }
-
-  def provisionGpioInputPin(pinNumber: Int,
-                            pudMode: PudMode = PudMode.PudDown): GpioBoard =
-    pins.values.find(_.pinNumber == pinNumber) match {
-      case None =>
-        val newPin = GpioInputPin.create(pinNumber, pudMode)
-        subject.onNext(PinProvisionedEvent(pinNumber, PinMode.Output))
-        copy(pins = pins + (pinNumber -> newPin))
-      case Some(pin) if pin.pinMode() == PinMode.Output => this
-      case Some(pin) => throw new IllegalArgumentException(s"${pinNumber} is already provisioned with different pinMode - ${pin.pinMode()}!!")
-    }
-
-  def provisionDefaultGpioPins[A: ClassTag](pinNumbers: Int*): GpioBoard = {
-    val gpiooutputpin = implicitly[ClassTag[GpioOutputPin]]
-    val gpioinputpin = implicitly[ClassTag[GpioInputPin]]
-
-    pinNumbers.foldLeft[GpioBoard](this)((currentBoard, currentPinNumber) =>
-      implicitly[ClassTag[A]] match {
-        case `gpiooutputpin` => currentBoard.provisionGpioOutputPin(currentPinNumber)
-        case `gpioinputpin` => currentBoard.provisionGpioInputPin(currentPinNumber)
-      }
-    )
-  }
-
-  def unprovisionGpioPin(pinNumber: Int): GpioBoard =
-    pins.values.find(_.pinNumber == pinNumber) match {
-      case None => this
-      case Some(pin) => copy(pins = pins - pinNumber)
-    }
-
-  def writeValue(pinNumber: Int, newValue: PinValue): GpioBoard = {
-    pins.values.find(_.pinNumber == pinNumber) match {
-      case None => throw new IllegalArgumentException(s"Pin $pinNumber is not initialised!!")
-      case Some(pin) if pin.pinMode() == PinMode.Output =>
-        copy(pins = pins + (pin.pinNumber -> pin.asInstanceOf[GpioOutputPin].writeValue(newValue)))
-      case Some(pin) => throw new IllegalArgumentException(s"${pinNumber} is already provisioned with different pinMode - ${pin.pinMode()}!!")
-    }
-  }
-
-  def shutdown(): GpioBoard = {
-    val newBoard = copy(pins = pins.mapValues(_.close()))
-    subject.onNext(GpioBoardShutDownEvent())
-    newBoard
-  }
-
 }

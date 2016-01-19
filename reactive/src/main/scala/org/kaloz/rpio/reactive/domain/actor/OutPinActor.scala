@@ -13,7 +13,7 @@ object OutPinActor {
 
 class OutPinActor(pinNumber: Int)(implicit protocolHandlerFactory: ProtocolHandlerFactory, subject: Subject[Event]) extends Actor {
 
-  val gpioOutputPin = GpioOutputPin.create(pinNumber)
+  val gpioOutputPin = GpioOutputPin(pinNumber)
 
   def receive: Receive = {
     case x: PinValue => {

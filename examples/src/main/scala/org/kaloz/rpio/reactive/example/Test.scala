@@ -8,7 +8,6 @@ import org.kaloz.rpio.reactive.infrastrucure.pigpiosocketchannel.PiGpioSocketCha
 import rx.lang.scala.Observer
 import rx.lang.scala.subjects.PublishSubject
 
-import scalaz.Scalaz._
 import scalaz._
 
 object Test extends App with StrictLogging {
@@ -23,22 +22,24 @@ object Test extends App with StrictLogging {
 
   import GpioBoard._
 
-  def simulateMachine(): State[GpioBoard, Unit] = for {
+  def startMotor(): State[GpioBoard, Unit] = for {
     _ <- provisionDefaultGpioOutputPins(25, 16, 21)
     _ <- provisionGpioPwmOutputPin(12)
     _ <- writeValue(25, High)
     _ <- writeValue(16, High)
-    _ <- writeValue(12, Pwm(255))
-    _ <- modify[GpioBoard](gpioBoard => {
-      Thread.sleep(5000)
-      gpioBoard
-    })
-    _ <- shutdown()
-    f <- get[GpioBoard]
+    _ <- writeValue(12, Pwm(100))
   } yield {}
 
   println("Start..")
-  val (s, _) = simulateMachine run (new GpioBoard())
-  println(s"State: $s")
+  val (board, _) = startMotor run (new GpioBoard())
+  println(s"State after start: $board")
 
+  Thread.sleep(5000)
+
+  def stopMotor(): State[GpioBoard, Unit] = for {
+    _ <- shutdown()
+  } yield {}
+
+  val (board2, _) = stopMotor run (board)
+  println(s"State after stop: $board2")
 }
