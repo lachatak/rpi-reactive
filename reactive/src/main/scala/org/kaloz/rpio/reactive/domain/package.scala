@@ -5,8 +5,6 @@ import org.kaloz.rpio.reactive.domain.PinMode._
 import org.kaloz.rpio.reactive.domain.PinValue._
 import org.kaloz.rpio.reactive.domain.PudMode._
 
-import scala.concurrent.Future
-
 package object domain {
 
   object DomainApi {
@@ -18,28 +16,28 @@ package object domain {
     trait Event
 
     trait ProtocolHandler {
-      def request(request: Request): Future[Response]
+      def request(request: Request): Response
 
-      def close(): Future[Unit]
+      def close(): Unit
     }
 
     trait ProtocolHandlerFactory {
-      def apply(pin: Option[Int] = None): ProtocolHandler
+      def apply(pinNumber: Option[Int] = None): ProtocolHandler
     }
 
-    case class ChangePinModeRequest(pin: Int, pinMode: PinMode) extends Request
+    case class ChangePinModeRequest(pinNumber: Int, pinMode: PinMode) extends Request
 
     case class ChangePinModeResponse(result: Int) extends Response
 
-    case class ChangePudModeRequest(pin: Int, pudMode: PudMode) extends Request
+    case class ChangePudModeRequest(pinNumber: Int, pudMode: PudMode) extends Request
 
     case class ChangePudModeResponse(result: Int) extends Response
 
-    case class ReadValueRequest(pin: Int) extends Request
+    case class ReadValueRequest(pinNumber: Int) extends Request
 
     case class ReadValueResponse(value: PinValue) extends Response
 
-    case class WriteValueRequest(pin: Int, value: PinValue) extends Request
+    case class WriteValueRequest(pinNumber: Int, value: PinValue) extends Request
 
     case class WriteValueResponse(result: Int) extends Response
 
@@ -47,9 +45,13 @@ package object domain {
 
     case class VersionResponse(version: Int) extends Response
 
-    case class PinValueChangedEvent(pin: Int, direction: Direction, value: PinValue) extends Event
+    case class PinProvisionedEvent(pinNumber: Int, pinMode: PinMode) extends Event
 
-    case class PinClosedEvent(pin: Int) extends Event
+    case class PinValueChangedEvent(pinNumber: Int, direction: Direction, value: PinValue) extends Event
+
+    case class PinClosedEvent(pinNumber: Int) extends Event
+
+    case class GpioBoardShutDownEvent() extends Event
 
   }
 

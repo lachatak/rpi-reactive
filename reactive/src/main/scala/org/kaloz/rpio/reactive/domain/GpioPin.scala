@@ -6,144 +6,127 @@ import org.kaloz.rpio.reactive.domain.DomainApi._
 import org.kaloz.rpio.reactive.domain.PinMode._
 import org.kaloz.rpio.reactive.domain.PinValue._
 import org.kaloz.rpio.reactive.domain.PudMode._
-import rx.lang.scala.subjects._
-import rx.lang.scala.{Observable, Subject}
+import rx.lang.scala.{Subscription, Observable, Subject}
 
-import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.duration._
-import scala.concurrent.{Await, Future}
 import scalaz.Scalaz._
 
-sealed abstract class GpioPin(val pin: Int, mode: PinMode, closed: Boolean)(implicit protocolHandler: ProtocolHandler, val subject: Subject[Event]) {
+sealed abstract class GpioPin(val pinNumber: Int, val pinMode: PinMode, closed: Boolean)(implicit protocolHandler: ProtocolHandler, subject: Subject[Event]) {
 
-  protected def changePinMode(pinMode: PinMode): Future[ChangePinModeResponse] =
-    protocolHandler.request(ChangePinModeRequest(pin, pinMode)).mapTo[ChangePinModeResponse]
+  type Self <: GpioPin
 
-  def pinMode(): Future[PinMode] = Future.successful(mode)
+  protected def changePinMode(pinMode: PinMode): this.type = {
+    protocolHandler.request(ChangePinModeRequest(pinNumber, pinMode))
+    this
+  }
 
-  def readValue(): Future[PinValue]
+  def value: PinValue
 
-  protected def close(): Future[Any] = protocolHandler.close()
+  def close(): Self
 
 }
 
 object GpioOutputPin {
-  def applyAsync(pin: Int,
-                 value: PinValue = PinValue.Low,
-                 default: PinValue = PinValue.Low,
-                 closed: Boolean = false)
-                (implicit protocolHandlerFactory: ProtocolHandlerFactory): Future[GpioOutputPin] = Future {
+  def apply(pinNumber: Int,
+            value: PinValue = PinValue.Low,
+            defaultValue: PinValue = PinValue.Low)
+           (implicit protocolHandlerFactory: ProtocolHandlerFactory, subject: Subject[Event]): GpioOutputPin = {
 
-    implicit val subject = PublishSubject[Event]()
-    implicit val protocolHandler = protocolHandlerFactory(pin.some)
+    implicit val protocolHandler = protocolHandlerFactory(pinNumber.some)
 
-    val newPin = new GpioOutputPin(pin, value, default, closed)
-
-    Await.ready(
-      Future.sequence(
-        Seq(
-          newPin.changePinMode(PinMode.Output),
-          newPin.writeValue(value)
-        )
-      ),
-      30 second)
-
-    newPin
+    new GpioOutputPin(pinNumber, value, defaultValue)
   }
 }
 
-case class GpioOutputPin(override val pin: Int,
-                         value: PinValue,
-                         default: PinValue,
-                         closed: Boolean)
-                        (implicit protocolHandler: ProtocolHandler, subject: Subject[Event]) extends GpioPin(pin, PinMode.Output, closed) {
+case class GpioOutputPin private(override val pinNumber: Int,
+                                 value: PinValue,
+                                 defaultValue: PinValue,
+                                 closed: Boolean)
+                                (implicit protocolHandler: ProtocolHandler, subject: Subject[Event]) extends GpioPin(pinNumber, PinMode.Output, closed) {
 
-
-  def readValue(): Future[PinValue] = Future.successful(value)
-
-  def writeValue(newValue: PinValue): Future[GpioOutputPin] = protocolHandler.request(WriteValueRequest(pin, newValue))
-    .mapTo[WriteValueResponse].map {
-    response =>
-      import PinValue.pinValueToInt
-      (value, newValue) match {
-        case (o, n) if (o == n) => this
-        case (o, n) if (o < n) =>
-          subject.onNext(PinValueChangedEvent(pin, Rising_Edge, newValue))
-          this.copy(value = newValue)
-        case (o, n) if (o > n) =>
-          subject.onNext(PinValueChangedEvent(pin, Falling_Edge, newValue))
-          this.copy(value = newValue)
-      }
+  private def this(pinNumber: Int, value: PinValue, default: PinValue)(implicit protocolHandler: ProtocolHandler, subject: Subject[Event]) {
+    this(pinNumber, value, default, false)
+    changePinMode(PinMode.Output).writeValue(value)
   }
 
-  override def close(): Future[GpioOutputPin] = for {
-    _ <- writeValue(default)
-    _ <- super.close()
-  } yield {
-    subject.onNext(PinClosedEvent(pin))
-    this.copy(value = default, closed = true)
+  type Self = GpioOutputPin
+
+  def writeValue(newValue: PinValue): GpioOutputPin = {
+    protocolHandler.request(WriteValueRequest(pinNumber, newValue))
+    import PinValue.pinValueToInt
+    (value, newValue) match {
+      case (o, n) if (o == n) => this
+      case (o, n) if (o < n) =>
+        subject.onNext(PinValueChangedEvent(pinNumber, Rising_Edge, newValue))
+        copy(value = newValue)
+      case (o, n) if (o > n) =>
+        subject.onNext(PinValueChangedEvent(pinNumber, Falling_Edge, newValue))
+        copy(value = newValue)
+    }
+  }
+
+  def close() = {
+    writeValue(defaultValue)
+    protocolHandler.close()
+    subject.onNext(PinClosedEvent(pinNumber))
+    copy(value = defaultValue, closed = true)
   }
 
 }
 
 object GpioInputPin {
-  def applyAsync(pin: Int,
-                 pudMode: PudMode = PudMode.PudDown,
-                 closed: Boolean = false)
-                (implicit protocolHandlerFactory: ProtocolHandlerFactory): Future[GpioInputPin] = Future {
+  def apply(pinNumber: Int,
+            pudMode: PudMode = PudMode.PudDown)
+           (implicit protocolHandlerFactory: ProtocolHandlerFactory, subject: Subject[Event]): GpioInputPin = {
 
-    implicit val protocolHandler = protocolHandlerFactory(pin.some)
-    implicit val subject = PublishSubject[Event]()
+    implicit val protocolHandler = protocolHandlerFactory(pinNumber.some)
 
-    val newPin = new GpioInputPin(pin, pudMode, closed)
-
-    Await.ready(
-      Future.sequence(
-        Seq(
-          newPin.changePinMode(PinMode.Input),
-          newPin.changePudMode(pudMode)
-        )
-      ).map(_ => newPin.changeListener()),
-      30 second)
-
-    newPin
+    new GpioInputPin(pinNumber, pudMode).initChangeListener()
   }
 }
 
-case class GpioInputPin(override val pin: Int,
-                        pud: PudMode = PudDown,
-                        closed: Boolean = false)
-                       (implicit protocolHandler: ProtocolHandler, subject: Subject[Event]) extends GpioPin(pin, PinMode.Input, closed) with Configuration {
+case class GpioInputPin private(override val pinNumber: Int,
+                                pudMode: PudMode,
+                                closed: Boolean,
+                                subscription: Option[Subscription])
+                               (implicit protocolHandler: ProtocolHandler, subject: Subject[Event]) extends GpioPin(pinNumber, PinMode.Input, closed) with Configuration {
 
+  type Self = GpioInputPin
 
-  private def changePudMode(pudMode: PudMode): Future[ChangePudModeResponse] =
-    protocolHandler.request(ChangePudModeRequest(pin, pudMode)).mapTo[ChangePudModeResponse]
-
-  def pudMode() = Future.successful(pud)
-
-  def readValue(): Future[PinValue] = protocolHandler.request(ReadValueRequest(pin)).mapTo[ReadValueResponse].map(_.value)
-
-  override def close(): Future[GpioInputPin] = super.close().map { _ =>
-    subject.onNext(PinClosedEvent(pin))
-    this.copy(closed = true)
+  private def this(pinNumber: Int, pudMode: PudMode)(implicit protocolHandler: ProtocolHandler, subject: Subject[Event]) {
+    this(pinNumber, pudMode, false, None)
+    changePinMode(PinMode.Input).changePudMode(pudMode)
   }
 
-  def changeListener(): Future[Unit] =
-    readValue().map {
-      case pinValue =>
-        var lastValue = pinValue
-        val intervals = Observable.interval(observablePin.refreshInterval millisecond)
-        intervals.subscribe(next => {
-          val currentValue = Await.result(readValue(), 30 seconds)
-          import PinValue.pinValueToInt
-          (lastValue, currentValue) match {
-            case (o, n) if (o == n) =>
-            case (o, n) if (o < n) =>
-              subject.onNext(PinValueChangedEvent(pin, Rising_Edge, currentValue))
-            case (o, n) if (o > n) =>
-              subject.onNext(PinValueChangedEvent(pin, Falling_Edge, currentValue))
-          }
-          lastValue = currentValue
-        })
-    }
+  private def changePudMode(pudMode: PudMode): this.type = {
+    protocolHandler.request(ChangePudModeRequest(pinNumber, pudMode))
+    this
+  }
+
+  def value: PinValue = protocolHandler.request(ReadValueRequest(pinNumber)).asInstanceOf[ReadValueResponse].value
+
+  def close() = {
+    protocolHandler.close()
+    subject.onNext(PinClosedEvent(pinNumber))
+    subscription.foreach(_.unsubscribe())
+    copy(closed = true, subscription = None)
+  }
+
+  def initChangeListener(): GpioInputPin = {
+    var lastValue = value
+    val intervals = Observable.interval(observablePin.refreshInterval millisecond)
+    val subscription = intervals.subscribe(next => {
+      val currentValue = value
+      import PinValue.pinValueToInt
+      (lastValue, currentValue) match {
+        case (o, n) if (o == n) =>
+        case (o, n) if (o < n) =>
+          subject.onNext(PinValueChangedEvent(pinNumber, Rising_Edge, currentValue))
+        case (o, n) if (o > n) =>
+          subject.onNext(PinValueChangedEvent(pinNumber, Falling_Edge, currentValue))
+      }
+      lastValue = currentValue
+    })
+    copy(subscription = subscription.some)
+  }
 }
