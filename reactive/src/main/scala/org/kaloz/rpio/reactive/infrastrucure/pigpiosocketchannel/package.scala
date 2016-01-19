@@ -15,19 +15,18 @@ import org.kaloz.rpio.reactive.infrastrucure.pigpiosocketchannel.InfrastructureA
 import org.kaloz.rpio.reactive.infrastrucure.pigpiosocketchannel.InfrastructureApi.WritePwmValue.WritePwmValueRequest
 import org.kaloz.rpio.reactive.infrastrucure.pigpiosocketchannel.InfrastructureApi.PiGpioVersion.PiGpioVersionRequest
 
-
 package object pigpiosocketchannel extends StrictLogging {
 
   object InfrastructureApi {
 
     object PiGpioSocketChannelRequest {
       implicit def domainToInfrastructure(request: DomainApi.Request): PiGpioSocketChannelRequest = request match {
-        case DomainApi.ChangePinModeRequest(pin, pinMode) => ChangeModeRequest(pin, pinMode)
-        case DomainApi.ChangePudModeRequest(pin, pudMode) => ChangePudRequest(pin, pudMode)
-        case DomainApi.ReadValueRequest(pin) => ReadDigitalValueRequest(pin)
-        case DomainApi.WriteValueRequest(pin, value) => value match {
-          case Low | High => WriteDigitalValueRequest(pin, value)
-          case dutyCycle@Pwm(_) => WritePwmValueRequest(pin, dutyCycle)
+        case DomainApi.ChangePinModeRequest(pinNumber, pinMode) => ChangeModeRequest(pinNumber, pinMode)
+        case DomainApi.ChangePudModeRequest(pinNumber, pudMode) => ChangePudRequest(pinNumber, pudMode)
+        case DomainApi.ReadValueRequest(pinNumber) => ReadDigitalValueRequest(pinNumber)
+        case DomainApi.WriteValueRequest(pinNumber, value) => value match {
+          case Low | High => WriteDigitalValueRequest(pinNumber, value)
+          case dutyCycle@Pwm(_) => WritePwmValueRequest(pinNumber, dutyCycle)
         }
         case DomainApi.VersionRequest() => PiGpioVersionRequest()
       }
@@ -76,13 +75,13 @@ package object pigpiosocketchannel extends StrictLogging {
 
     object ChangeMode {
 
-      case class ChangeModeRequest(pin: Int, value: PinMode) extends PiGpioSocketChannelRequest {
+      case class ChangeModeRequest(pinNumber: Int, value: PinMode) extends PiGpioSocketChannelRequest {
         type ResponseHandlerType = ChangeModeResponseHandler
 
         import org.kaloz.rpio.reactive.infrastrucure.pigpiosocketchannel.PinMode.pinModeToInt
 
         val command: Int = 0
-        val param1: Int = pin
+        val param1: Int = pinNumber
         val param2: Int = value
         val param3: Int = 0
 
@@ -97,13 +96,13 @@ package object pigpiosocketchannel extends StrictLogging {
 
     object ChangePud {
 
-      case class ChangePudRequest(pin: Int, value: PudMode) extends PiGpioSocketChannelRequest {
+      case class ChangePudRequest(pinNumber: Int, value: PudMode) extends PiGpioSocketChannelRequest {
         type ResponseHandlerType = ChangePudResponseHandler
 
         import org.kaloz.rpio.reactive.infrastrucure.pigpiosocketchannel.PudMode.pudModeToInt
 
         val command: Int = 2
-        val param1: Int = pin
+        val param1: Int = pinNumber
         val param2: Int = value
         val param3: Int = 0
 
@@ -118,11 +117,11 @@ package object pigpiosocketchannel extends StrictLogging {
 
     object ReadDigitalValue {
 
-      case class ReadDigitalValueRequest(pin: Int) extends PiGpioSocketChannelRequest {
+      case class ReadDigitalValueRequest(pinNumber: Int) extends PiGpioSocketChannelRequest {
         type ResponseHandlerType = ReadDigitalValueResponseHandler
 
         val command: Int = 3
-        val param1: Int = pin
+        val param1: Int = pinNumber
         val param2: Int = 0
         val param3: Int = 0
 
@@ -140,13 +139,13 @@ package object pigpiosocketchannel extends StrictLogging {
 
     object WriteDigitalValue {
 
-      case class WriteDigitalValueRequest(pin: Int, value: PinValue) extends PiGpioSocketChannelRequest {
+      case class WriteDigitalValueRequest(pinNumber: Int, value: PinValue) extends PiGpioSocketChannelRequest {
         type ResponseHandlerType = WriteDigitalValueResponseHandler
 
         import org.kaloz.rpio.reactive.infrastrucure.pigpiosocketchannel.PinValue.pinValueToInt
 
         val command: Int = 4
-        val param1: Int = pin
+        val param1: Int = pinNumber
         val param2: Int = value
         val param3: Int = 0
 
@@ -161,13 +160,13 @@ package object pigpiosocketchannel extends StrictLogging {
 
     object WritePwmValue {
 
-      case class WritePwmValueRequest(pin: Int, dutyCycle: Pwm) extends PiGpioSocketChannelRequest {
+      case class WritePwmValueRequest(pinNumber: Int, dutyCycle: Pwm) extends PiGpioSocketChannelRequest {
         type ResponseHandlerType = WritePwmResponseHandler
 
         import org.kaloz.rpio.reactive.infrastrucure.pigpiosocketchannel.PinValue.pinPwmValueToInt
 
         val command: Int = 5
-        val param1: Int = pin
+        val param1: Int = pinNumber
         val param2: Int = dutyCycle
         val param3: Int = 0
 

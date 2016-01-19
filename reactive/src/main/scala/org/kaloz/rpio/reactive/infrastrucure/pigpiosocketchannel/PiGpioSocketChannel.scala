@@ -15,8 +15,6 @@ import org.kaloz.rpio.reactive.infrastrucure.pigpiosocketchannel.InfrastructureA
 import org.kaloz.rpio.reactive.infrastrucure.pigpiosocketchannel.InfrastructureApi.PiGpioSocketChannelRequest.domainToInfrastructure
 import org.slf4j.MDC
 
-import scala.concurrent.ExecutionContext.Implicits.global
-import scala.concurrent.Future
 import scala.concurrent.duration._
 import scalaz.Scalaz._
 
@@ -28,17 +26,17 @@ object PiGpioSocketChannel extends ProtocolHandlerFactory with StrictLogging {
 
   val protocolHandlerMap = new ConcurrentHashMap[Option[Int], PiGpioSocketChannel]()
 
-  def apply(pin: Option[Int] = None): ProtocolHandler = protocolHandlerMap.computeIfAbsent(pin, toJavaFunction(pin => {
-    logger.debug(s"Create protocol handler for $pin")
-    new PiGpioSocketChannel(pin)
+  def apply(pinNumber: Option[Int] = None): ProtocolHandler = protocolHandlerMap.computeIfAbsent(pinNumber, toJavaFunction(pin => {
+    logger.debug(s"Create protocol handler for $pinNumber")
+    new PiGpioSocketChannel(pinNumber)
   })
   )
 }
 
-class PiGpioSocketChannel(pin: Option[Int]) extends ProtocolHandler with StrictLogging with Configuration {
+class PiGpioSocketChannel(pinNumber: Option[Int]) extends ProtocolHandler with StrictLogging with Configuration {
 
   val pool = Pool[PiGpioSockerChannelPoolObject](capacity = pigpio.connectionPoolCapacity,
-    factory = () => PiGpioSockerChannelPoolObject()(pin),
+    factory = () => PiGpioSockerChannelPoolObject()(pinNumber),
     reset = _.reset(),
     dispose = _.dispose(),
     healthCheck = pigpio.connectionPoolHealthcheck.fold(_.healthCheck(), _ => true),
@@ -53,20 +51,20 @@ class PiGpioSocketChannel(pin: Option[Int]) extends ProtocolHandler with StrictL
 }
 
 
-case class PiGpioSockerChannelPoolObject()(implicit pin: Option[Int]) extends StrictLogging with Configuration {
+case class PiGpioSockerChannelPoolObject()(implicit pinNumber: Option[Int]) extends StrictLogging with Configuration {
 
   implicit val uuid = UUID.randomUUID().toString
-  logger.debug(s"Open channel for $pin:$uuid")
+  logger.debug(s"Open channel for $pinNumber:$uuid")
 
   val socketChannel = SocketChannel.open()
   socketChannel.connect(new InetSocketAddress(pigpio.serverHost, pigpio.serverPort))
   val writeBuffer: ByteBuffer = ByteBuffer.allocate(16).order(ByteOrder.LITTLE_ENDIAN)
-  logger.debug(s"Channel opened for $pin:$uuid")
+  logger.debug(s"Channel opened for $pinNumber:$uuid")
 
   private def sendPiGpioSocketChannelRequest(request: PiGpioSocketChannelRequest): Response = {
 
     MDC.put("uuid", uuid)
-    MDC.put("pin", pin.map(_.toString).getOrElse("N/A"))
+    MDC.put("pin", pinNumber.map(_.toString).getOrElse("N/A"))
 
     logger.debug(s"Request - $request")
     socketChannel.write(request.fill(writeBuffer))
@@ -87,7 +85,7 @@ case class PiGpioSockerChannelPoolObject()(implicit pin: Option[Int]) extends St
   }
 
   def dispose() = {
-    logger.debug(s"Close channel for $pin:$uuid")
+    logger.debug(s"Close channel for $pinNumber:$uuid")
     socketChannel.close()
   }
 }
