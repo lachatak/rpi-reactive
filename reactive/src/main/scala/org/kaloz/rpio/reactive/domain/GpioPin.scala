@@ -1,12 +1,13 @@
 package org.kaloz.rpio.reactive.domain
 
+import com.typesafe.scalalogging.StrictLogging
 import org.kaloz.rpio.reactive.config.Configuration
 import org.kaloz.rpio.reactive.domain.Direction._
 import org.kaloz.rpio.reactive.domain.DomainApi._
 import org.kaloz.rpio.reactive.domain.PinMode._
 import org.kaloz.rpio.reactive.domain.PinValue._
 import org.kaloz.rpio.reactive.domain.PudMode._
-import rx.lang.scala.{Subscription, Observable, Subject}
+import rx.lang.scala.{Observable, Subject, Subscription}
 
 import scala.concurrent.duration._
 import scalaz.Scalaz._
@@ -56,16 +57,14 @@ case class GpioOutputPin private(override val pinNumber: Int,
     import PinValue.pinValueToInt
     (value, newValue) match {
       case (o, n) if (o == n) => this
-      case (o, n) if (o < n) =>
-        subject.onNext(PinValueChangedEvent(pinNumber, Rising_Edge, newValue))
-        copy(value = newValue)
-      case (o, n) if (o > n) =>
-        subject.onNext(PinValueChangedEvent(pinNumber, Falling_Edge, newValue))
+      case (o, n) =>
+        subject.onNext((o < n).fold(PinValueChangedEvent(pinNumber, Rising_Edge, newValue), PinValueChangedEvent(pinNumber, Falling_Edge, newValue)))
         copy(value = newValue)
     }
   }
 
   def close() = {
+    println(s"close $pinNumber")
     writeValue(defaultValue)
     protocolHandler.close()
     subject.onNext(PinClosedEvent(pinNumber))
@@ -89,7 +88,7 @@ case class GpioInputPin private(override val pinNumber: Int,
                                 pudMode: PudMode,
                                 closed: Boolean,
                                 subscription: Option[Subscription])
-                               (implicit protocolHandler: ProtocolHandler, subject: Subject[Event]) extends GpioPin(pinNumber, PinMode.Input, closed) with Configuration {
+                               (implicit protocolHandler: ProtocolHandler, subject: Subject[Event]) extends GpioPin(pinNumber, PinMode.Input, closed) with Configuration with StrictLogging {
 
   type Self = GpioInputPin
 
@@ -106,9 +105,10 @@ case class GpioInputPin private(override val pinNumber: Int,
   def value: PinValue = protocolHandler.request(ReadValueRequest(pinNumber)).asInstanceOf[ReadValueResponse].value
 
   def close() = {
+    println(s"close $pinNumber")
+    subscription.foreach(_.unsubscribe())
     protocolHandler.close()
     subject.onNext(PinClosedEvent(pinNumber))
-    subscription.foreach(_.unsubscribe())
     copy(closed = true, subscription = None)
   }
 
@@ -120,12 +120,12 @@ case class GpioInputPin private(override val pinNumber: Int,
       import PinValue.pinValueToInt
       (lastValue, currentValue) match {
         case (o, n) if (o == n) =>
-        case (o, n) if (o < n) =>
-          subject.onNext(PinValueChangedEvent(pinNumber, Rising_Edge, currentValue))
-        case (o, n) if (o > n) =>
-          subject.onNext(PinValueChangedEvent(pinNumber, Falling_Edge, currentValue))
+        case (o, n) =>
+          subject.onNext((o < n).fold(PinValueChangedEvent(pinNumber, Rising_Edge, currentValue), PinValueChangedEvent(pinNumber, Falling_Edge, currentValue)))
+          lastValue = currentValue
       }
-      lastValue = currentValue
+    }, onError = t => {
+      logger.warn(t.toString)
     })
     copy(subscription = subscription.some)
   }
