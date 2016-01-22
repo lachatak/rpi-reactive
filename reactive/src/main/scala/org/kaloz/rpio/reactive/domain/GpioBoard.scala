@@ -1,14 +1,17 @@
 package org.kaloz.rpio.reactive.domain
 
-import org.kaloz.rpio.reactive.domain.DomainApi.{Event, GpioBoardShutDownEvent, PinProvisionedEvent, ProtocolHandlerFactory}
+import com.typesafe.scalalogging.StrictLogging
+import org.kaloz.rpio.reactive.domain.Direction._
+import org.kaloz.rpio.reactive.domain.DomainApi._
 import org.kaloz.rpio.reactive.domain.PinValue.{PinValue, Pwm}
 import org.kaloz.rpio.reactive.domain.PudMode.PudMode
-import rx.lang.scala.Subject
+import rx.lang.scala.schedulers.NewThreadScheduler
+import rx.lang.scala.{Observer, Subject, Subscription}
 
 import scala.reflect.ClassTag
 import scalaz.Scalaz._
 
-case class GpioBoard(pins: Map[Int, GpioPin] = Map.empty, pwmCapablePins: Set[Int] = Set(12, 13, 18, 19))(implicit protocolHandlerFactory: ProtocolHandlerFactory, subject: Subject[Event]) {
+case class GpioBoard(pins: Map[Int, GpioPin] = Map.empty, pwmCapablePins: Set[Int] = Set(12, 13, 18, 19))(implicit protocolHandlerFactory: ProtocolHandlerFactory, val subject: Subject[Event]) extends StrictLogging {
 
   def provisionGpioOutputPin(pinNumber: Int,
                              value: PinValue = PinValue.Low,
@@ -35,7 +38,7 @@ case class GpioBoard(pins: Map[Int, GpioPin] = Map.empty, pwmCapablePins: Set[In
     applyOnPin[GpioBoard](pinNumber,
       empty = () => {
         val newPin = GpioInputPin(pinNumber, pudMode)
-        subject.onNext(PinProvisionedEvent(pinNumber, PinMode.Output))
+        subject.onNext(PinProvisionedEvent(pinNumber, PinMode.Input))
         copy(pins = pins + (pinNumber -> newPin))
       },
       nonEmpty = pin =>
@@ -79,7 +82,7 @@ case class GpioBoard(pins: Map[Int, GpioPin] = Map.empty, pwmCapablePins: Set[In
       nonEmpty = pin => pin.value.some)
 
   def shutdown(): GpioBoard = {
-    val newBoard = copy(pins = pins.mapValues(_.close()))
+    val newBoard = copy(pins = pins.mapValues(_.close()).map(identity))
     subject.onNext(GpioBoardShutDownEvent())
     newBoard
   }
@@ -116,6 +119,13 @@ object GpioBoard {
 
   def provisionDefaultGpioInputPins(pinNumbers: Int*) = modify[GpioBoard] { gpioBoard =>
     gpioBoard.provisionDefaultGpioPins[GpioInputPin](pinNumbers: _*)
+  }
+
+  def subscribeOneOffPinValueChangedEvent(pinNumber: Int, direction: Direction, eventOn: Event => Unit) = gets[GpioBoard, Subscription] { gpioBoard =>
+    gpioBoard.subject.filter(_ match {
+      case PinValueChangedEvent(`pinNumber`, `direction`, _) => true
+      case _ => false
+    }).take(1).observeOn(NewThreadScheduler()).subscribe(Observer[Event]((event: Event) => eventOn(event)))
   }
 
   def writeValue(pinNumber: Int, newValue: PinValue) = modify[GpioBoard] { gpioBoard =>
