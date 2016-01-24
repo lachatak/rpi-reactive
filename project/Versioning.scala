@@ -3,6 +3,7 @@ import com.typesafe.sbt.SbtGit.git
 object Versioning {
 
   val VersionRegex = "v([0-9]+.[0-9]+.[0-9]+)-?(.*)?".r
+  
 
   lazy val settings = Seq(
     git.baseVersion := "1.0.0",
