@@ -2,8 +2,8 @@ lazy val root = Project("root", file("."))
   .aggregate(reactive, examples)
   .settings(BaseSettings.settings: _*)
   .settings(Publish.noPublishing: _*)
-  .settings(Versioning.settings: _*)
   .enablePlugins(GitVersioning)
+  .settings(Versioning.settings: _*)
 
 
 lazy val reactive = Project("reactive", file("reactive"))
