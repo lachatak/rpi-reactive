@@ -4,6 +4,7 @@ lazy val root = Project("root", file("."))
   .settings(Publish.noPublishing: _*)
   .enablePlugins(GitVersioning)
   .settings(Versioning.settings: _*)
+  .settings(ReleaseProcess.settings: _*)
 
 
 lazy val reactive = Project("reactive", file("reactive"))
