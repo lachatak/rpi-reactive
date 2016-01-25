@@ -69,6 +69,8 @@ object ReleaseProcess {
         runTest,
         tagRelease,
         publishArtifacts
-      )
+      ),
+      //Just for testing purpose to see that the versioning is vorking
+      publishTo := Some(Resolver.file("file", new File(Path.userHome.absolutePath + "/.m2/repository")))
     )
 }
