@@ -6,6 +6,9 @@ import sbtrelease.ReleasePlugin.autoImport._
 import sbtrelease.ReleaseStateTransformations._
 import sbtrelease._
 
+import scala.util
+import scala.util.Success
+
 object ReleaseProcess {
 
   def setVersionOnly(selectVersion: Versions => String): ReleaseStep = { st: State =>
@@ -26,7 +29,12 @@ object ReleaseProcess {
 
   def defineVersionsByCommits(baseDir: File, baseVersion: String): ReleaseStep = { st: State =>
 
-    def currentVersion(): Option[Version] = Some((Process("git describe --abbrev=0 --tags", baseDir) !!)).filterNot(_ == "fatal").flatMap(tag => sbtrelease.Version(tag.replaceAll("\n", "").substring(1)))
+    def currentVersion(): Option[Version] = {
+      util.Try(Process("git describe --abbrev=0 --tags", baseDir) !!) match {
+        case Success(result) => Some(result).filterNot(_ == "fatal").map(_.replaceAll("\n", "")).flatMap(tag => sbtrelease.Version(tag.substring(1)))
+        case _ => None
+      }
+    }
 
     def currentVersionSha1(currentVersion: Version): Option[String] = Some((Process(s"git rev-list -n 1 v${currentVersion.string}", baseDir) !!)).map(_.replaceAll("\n", ""))
 
@@ -68,9 +76,10 @@ object ReleaseProcess {
         runClean,
         runTest,
         tagRelease,
-        publishArtifacts
+        publishArtifacts,
+        pushChanges
       ),
       //Just for testing purpose to see that the versioning is vorking
-      publishTo := Some(Resolver.file("file", new File(Path.userHome.absolutePath + "/.m2/repository")))
+      publishTo := Some(Resolver.file("local", file(Path.userHome.absolutePath + "/.ivy2/local"))(Resolver.ivyStylePatterns))
     )
 }

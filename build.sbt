@@ -2,16 +2,15 @@ lazy val root = Project("root", file("."))
   .aggregate(reactive, examples)
   .settings(BaseSettings.settings: _*)
   .settings(Publish.noPublishing: _*)
-  .enablePlugins(GitVersioning)
   .settings(Versioning.settings: _*)
-  .settings(ReleaseProcess.settings: _*)
-
+  .enablePlugins(GitVersioning)
 
 lazy val reactive = Project("reactive", file("reactive"))
   .settings(BaseSettings.settings: _*)
   .settings(Dependencies.reactive: _*)
   .settings(Testing.settings: _*)
   .settings(BuildInfoGenerator.buildInfoGeneratorSettings: _*)
+  .settings(ReleaseProcess.settings: _*)
   .enablePlugins(BuildInfoPlugin)
 
 lazy val examples = Project("examples", file("examples"))
