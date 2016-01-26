@@ -1,4 +1,5 @@
 import sbt.Keys._
+import sbt._
 
 object Publish {
 
@@ -38,5 +39,10 @@ object Publish {
   lazy val noPublishing = Seq(
     publish :=(),
     publishLocal :=()
+  )
+
+  lazy val publishing = Seq(
+    //Just for testing purpose to see that the versioning is vorking
+    publishTo := Some(Resolver.defaultLocal)
   )
 }
