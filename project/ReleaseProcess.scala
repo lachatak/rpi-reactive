@@ -46,27 +46,29 @@ object ReleaseProcess {
 
       if (comments.isEmpty) {
         defaultChoice orElse SimpleReader.readLine(s"v${currentVersion.string} is the latest tag version! No new commit to release! Overwrite or keep tag (o/k)? [o] ") match {
-          case Some("" | "o" | "O") => st.log.warn("Overwriting a tag can cause problems if others have already seen the tag!")
+          case Some("" | "o" | "O") =>
+            st.log.warn("Overwriting a tag can cause problems if others have already seen the tag!")
+            Some(currentVersion)
           case Some("k" | "K") => sys.error(s"v${currentVersion.string} already exists. Aborting release!")
           case Some(x) => sys.error(s"Invalid option $x!")
         }
-      }
-
-      println(s"extracted v${currentVersion.string} with $currentVersionSha1")
-      println(s"extracted command symbols since the tag: $comments")
-
-      val nextVersion = if (comments.contains('!')) {
-        currentVersion.bumpMajor.copy(minor = Some(0), bugfix = Some(0))
-      } else if (comments.contains('+')) {
-        currentVersion.bumpMinor.copy(bugfix = Some(0))
-      } else if (comments.contains('=')) {
-        currentVersion.bumpBugfix
       } else {
-        currentVersion.bumpMinor.copy(bugfix = Some(0))
-      }
-      println(s"derived version number: v${nextVersion.string}")
+        println(s"extracted v${currentVersion.string} with $currentVersionSha1")
+        println(s"extracted command symbols since the tag: $comments")
 
-      Some(nextVersion)
+        val nextVersion = if (comments.contains('!')) {
+          currentVersion.bumpMajor.copy(minor = Some(0), bugfix = Some(0))
+        } else if (comments.contains('+')) {
+          currentVersion.bumpMinor.copy(bugfix = Some(0))
+        } else if (comments.contains('=')) {
+          currentVersion.bumpBugfix
+        } else {
+          currentVersion.bumpMinor.copy(bugfix = Some(0))
+        }
+        println(s"derived version number: v${nextVersion.string}")
+
+        Some(nextVersion)
+      }
     }
 
     val releaseV = for {
