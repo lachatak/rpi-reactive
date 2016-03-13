@@ -4,46 +4,48 @@ import java.util.concurrent.CountDownLatch
 
 import com.typesafe.scalalogging.StrictLogging
 import org.kaloz.rpio.reactive.domain.Direction._
-import org.kaloz.rpio.reactive.domain.DomainApi._
+import org.kaloz.rpio.reactive.domain.GpioBoard
 import org.kaloz.rpio.reactive.domain.GpioBoard._
 import org.kaloz.rpio.reactive.domain.PinValue._
-import org.kaloz.rpio.reactive.domain._
+import org.kaloz.rpio.reactive.domain.PudMode._
+import org.kaloz.rpio.reactive.domain.service.DomainPublisher
 import org.kaloz.rpio.reactive.infrastrucure.pigpiosocketchannel.PiGpioSocketChannel
-import rx.lang.scala.Observer
-import rx.lang.scala.subjects.PublishSubject
 
-import scalaz.Scalaz._
 import scalaz._
 
 object Test extends App with StrictLogging {
 
   val countDownLatch = new CountDownLatch(1)
 
-  implicit val protocolHandlerFactory = PiGpioSocketChannel
-  implicit val subject = PublishSubject[Event]()
-  subject.subscribe(Observer[Event]((event: Event) => println(event)))
+  implicit val sendReceiveHandler = PiGpioSocketChannel
+  implicit val domainPublisher = DomainPublisher
 
-  val state = scalaz.StateT.stateMonad[GpioBoard]
+  domainPublisher.subscribe {
+    case x => println(x)
+  }
 
-  def initMotor(): State[GpioBoard, Unit] = for {
-    _ <- provisionGpioInputPin(17, PudMode.PudUp)
+  def initMotor(): GpioBoardState = for {
+    _ <- provisionGpioInputPin(17, PudUp)
     _ <- provisionDefaultGpioOutputPins(25, 16, 21)
     _ <- provisionGpioPwmOutputPin(12)
-    board <- get[GpioBoard]
-    _ <- subscribeOneOffPinValueChangedEvent(17, Falling_Edge, _ => startMotor run (board))
-  } yield {}
+    value <- readValue(12)
+    _ <- subscribeOneOffPinValueChangedEvent(17, Falling_Edge, startMotor)
+  } yield {
+    println(value)
+  }
 
-  def startMotor(): State[GpioBoard, Unit] = for {
+  def startMotor(): GpioBoardState = for {
     _ <- writeValue(25, High)
     _ <- writeValue(16, High)
     _ <- writeValue(12, Pwm(100))
-    board <- get[GpioBoard]
-    _ <- subscribeOneOffPinValueChangedEvent(17, Falling_Edge, _ => stopMotor run (board))
+    _ <- subscribeOneOffPinValueChangedEvent(17, Falling_Edge, stopMotor)
   } yield {}
 
-  def stopMotor(): State[GpioBoard, Unit] = for {
+  def stopMotor(): GpioBoardState = for {
+    value <- readValue(17)
     _ <- shutdown()
   } yield {
+    println(value)
     countDownLatch.countDown()
   }
 

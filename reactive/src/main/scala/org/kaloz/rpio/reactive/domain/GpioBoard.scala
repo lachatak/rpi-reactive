@@ -1,30 +1,33 @@
 package org.kaloz.rpio.reactive.domain
 
 import com.typesafe.scalalogging.StrictLogging
+import org.kaloz.rpio.reactive.config.Configuration
 import org.kaloz.rpio.reactive.domain.Direction._
-import org.kaloz.rpio.reactive.domain.DomainApi._
+import org.kaloz.rpio.reactive.domain.GpioPin._
 import org.kaloz.rpio.reactive.domain.PinValue.{PinValue, Pwm}
-import org.kaloz.rpio.reactive.domain.PudMode.PudMode
-import rx.lang.scala.schedulers.NewThreadScheduler
-import rx.lang.scala.{Observer, Subject, Subscription}
+import org.kaloz.rpio.reactive.domain.PudMode._
+import org.kaloz.rpio.reactive.domain.api._
+import org.kaloz.rpio.reactive.domain.service.PinManipulationService._
 
 import scala.reflect.ClassTag
 import scalaz.Scalaz._
+import scalaz._
 
-case class GpioBoard(pins: Map[Int, GpioPin] = Map.empty, pwmCapablePins: Set[Int] = Set(12, 13, 18, 19))(implicit protocolHandlerFactory: ProtocolHandlerFactory, val subject: Subject[Event]) extends StrictLogging {
+case class GpioBoard(pins: Map[Int, GpioPin] = Map.empty, pwmCapablePins: Set[Int] = Set(12, 13, 18, 19))(implicit sendReceiveHandler: SendReceiveHandler, val domainPublisher: DomainPublisher) extends Configuration with StrictLogging {
 
-  def provisionGpioOutputPin(pinNumber: Int,
-                             value: PinValue = PinValue.Low,
-                             default: PinValue = PinValue.Low): GpioBoard =
+  def provisionGpioOutputPin(pinNumber: Int, value: PinValue = PinValue.Low, default: PinValue = PinValue.Low): GpioBoard =
     applyOnPin[GpioBoard](pinNumber,
       empty = () => {
         (value, default) match {
           case (Pwm(_), _) | (_, Pwm(_)) if (!pwmCapablePins.contains(pinNumber)) => throw new IllegalArgumentException(s"Pin $pinNumber cannot be initialised as a PWM pin!")
           case (_, _) =>
         }
-        val newPin = GpioOutputPin(pinNumber, value, default)
-        subject.onNext(PinProvisionedEvent(pinNumber, PinMode.Output))
-        copy(pins = pins + (pinNumber -> newPin))
+        outputPin(pinNumber, value, default)(sendReceiveHandler) match {
+          case \/-(newPin) =>
+            domainPublisher.publish(PinProvisionedEvent(pinNumber, PinMode.Output))
+            copy(pins = pins + (pinNumber -> newPin))
+          case -\/(t) => throw new IllegalArgumentException(s"Error Provisioning output ${pinNumber}!")
+        }
       },
       nonEmpty = pin =>
         (pin.pinMode == PinMode.Output).fold(
@@ -33,13 +36,15 @@ case class GpioBoard(pins: Map[Int, GpioPin] = Map.empty, pwmCapablePins: Set[In
         )
     )
 
-  def provisionGpioInputPin(pinNumber: Int,
-                            pudMode: PudMode = PudMode.PudDown): GpioBoard =
+  def provisionGpioInputPin(pinNumber: Int, pudMode: PudMode = PudDown): GpioBoard =
     applyOnPin[GpioBoard](pinNumber,
       empty = () => {
-        val newPin = GpioInputPin(pinNumber, pudMode)
-        subject.onNext(PinProvisionedEvent(pinNumber, PinMode.Input))
-        copy(pins = pins + (pinNumber -> newPin))
+        inputPin(pinNumber, pudMode, ObservablePinConf.refreshInterval)(domainPublisher)(sendReceiveHandler) match {
+          case \/-(newPin) =>
+            domainPublisher.publish(PinProvisionedEvent(pinNumber, PinMode.Input))
+            copy(pins = pins + (pinNumber -> newPin))
+          case -\/(t) => throw t
+        }
       },
       nonEmpty = pin =>
         (pin.pinMode == PinMode.Input).fold(
@@ -63,27 +68,42 @@ case class GpioBoard(pins: Map[Int, GpioPin] = Map.empty, pwmCapablePins: Set[In
   def unprovisionGpioPin(pinNumber: Int): GpioBoard =
     applyOnPin[GpioBoard](pinNumber,
       empty = () => this,
-      nonEmpty = pin => copy(pins = pins - pinNumber)
-    )
+      nonEmpty = pin =>
+        (if (pin.isInstanceOf[GpioInputPin]) close(pin.asInstanceOf[GpioInputPin])(domainPublisher)(sendReceiveHandler)
+        else close(pin.asInstanceOf[GpioOutputPin])(domainPublisher)(sendReceiveHandler)) match {
+          case \/-(newPin) => copy(pins = pins - pinNumber)
+          case -\/(t) => throw t
+        })
 
-  def writeValue(pinNumber: Int, newValue: PinValue): GpioBoard =
+  def writePinValue(pinNumber: Int, newValue: PinValue): GpioBoard =
     applyOnPin[GpioBoard](pinNumber,
       empty = () => throw new IllegalArgumentException(s"Pin $pinNumber is not initialised!!"),
       nonEmpty = pin =>
         (pin.pinMode == PinMode.Output).fold(
-          copy(pins = pins + (pin.pinNumber -> pin.asInstanceOf[GpioOutputPin].writeValue(newValue))),
+          writeValue(pin.asInstanceOf[GpioOutputPin], newValue)(domainPublisher)(sendReceiveHandler) match {
+            case \/-(newPin) => copy(pins = pins + (pin.pinNumber -> newPin))
+            case -\/(t) => throw t
+          },
           throw new IllegalArgumentException(s"${pinNumber} is already provisioned with different pinMode - ${pin.pinMode}!!")
         )
     )
 
-  def readValue(pinNumber: Int): Option[PinValue] =
+  def readPinValue(pinNumber: Int): Option[PinValue] =
     applyOnPin[Option[PinValue]](pinNumber,
       empty = () => None,
-      nonEmpty = pin => pin.value.some)
+      nonEmpty = pin => (if (pin.isInstanceOf[GpioInputPin]) readValue(pin.asInstanceOf[GpioInputPin]) else readValue(pin.asInstanceOf[GpioOutputPin])) (sendReceiveHandler) match {
+        case \/-(value) => Some(value)
+        case -\/(t) => throw t
+      })
 
   def shutdown(): GpioBoard = {
-    val newBoard = copy(pins = pins.mapValues(_.close()).map(identity))
-    subject.onNext(GpioBoardShutDownEvent())
+    val newBoard = pins.values.partition(_.isInstanceOf[GpioInputPin]) match {
+      case (input, output) => List(input.map(p => close(p.asInstanceOf[GpioInputPin])(domainPublisher)(sendReceiveHandler)), output.map(p => close(p.asInstanceOf[GpioOutputPin])(domainPublisher)(sendReceiveHandler))).flatten.sequenceU match {
+        case \/-(newPins: List[GpioPin]) => copy(pins = newPins.map(newPin => (newPin.pinNumber -> newPin)).toMap)
+        case -\/(t) => throw t
+      }
+    }
+    domainPublisher.publish(GpioBoardShutDownEvent())
     newBoard
   }
 
@@ -97,42 +117,58 @@ case class GpioBoard(pins: Map[Int, GpioPin] = Map.empty, pwmCapablePins: Set[In
 
 object GpioBoard {
 
-  def provisionGpioOutputPin(pinNumber: Int,
-                             value: PinValue = PinValue.Low,
-                             default: PinValue = PinValue.Low) = modify[GpioBoard] { gpioBoard =>
-    gpioBoard.provisionGpioOutputPin(pinNumber, value, default)
-  }
+  type PinManipulation = ValidationNel[String, GpioBoard]
+  type GpioBoardState = State[GpioBoard, Unit]
 
-  def provisionGpioPwmOutputPin(pinNumber: Int,
-                                value: PinValue = Pwm(0),
-                                default: PinValue = Pwm(0)) = modify[GpioBoard] { gpioBoard =>
-    gpioBoard.provisionGpioOutputPin(pinNumber, value, default)
-  }
+  def provisionGpioOutputPin(pinNumber: Int, value: PinValue = PinValue.Low, default: PinValue = PinValue.Low) =
+    modify[GpioBoard] { gpioBoard =>
+      gpioBoard.provisionGpioOutputPin(pinNumber, value, default)
+    }
 
-  def provisionDefaultGpioOutputPins(pinNumbers: Int*) = modify[GpioBoard] { gpioBoard =>
-    gpioBoard.provisionDefaultGpioPins[GpioOutputPin](pinNumbers: _*)
-  }
+  def provisionGpioPwmOutputPin(pinNumber: Int, value: PinValue = Pwm(0), default: PinValue = Pwm(0)) =
+    modify[GpioBoard] { gpioBoard =>
+      gpioBoard.provisionGpioOutputPin(pinNumber, value, default)
+    }
 
-  def provisionGpioInputPin(pinNumber: Int, pudMode: PudMode = PudMode.PudDown) = modify[GpioBoard] { gpioBoard =>
-    gpioBoard.provisionGpioInputPin(pinNumber, pudMode)
-  }
+  def provisionDefaultGpioOutputPins(pinNumbers: Int*) =
+    modify[GpioBoard] { gpioBoard =>
+      gpioBoard.provisionDefaultGpioPins[GpioOutputPin](pinNumbers: _*)
+    }
 
-  def provisionDefaultGpioInputPins(pinNumbers: Int*) = modify[GpioBoard] { gpioBoard =>
-    gpioBoard.provisionDefaultGpioPins[GpioInputPin](pinNumbers: _*)
-  }
+  def provisionGpioInputPin(pinNumber: Int, pudMode: PudMode = PudMode.PudDown) =
+    modify[GpioBoard] { gpioBoard =>
+      gpioBoard.provisionGpioInputPin(pinNumber, pudMode)
+    }
 
-  def subscribeOneOffPinValueChangedEvent(pinNumber: Int, direction: Direction, eventOn: Event => Unit) = gets[GpioBoard, Subscription] { gpioBoard =>
-    gpioBoard.subject.filter(_ match {
-      case PinValueChangedEvent(`pinNumber`, `direction`, _) => true
-      case _ => false
-    }).take(1).observeOn(NewThreadScheduler()).subscribe(Observer[Event]((event: Event) => eventOn(event)))
-  }
+  def provisionDefaultGpioInputPins(pinNumbers: Int*) =
+    modify[GpioBoard] { gpioBoard =>
+      gpioBoard.provisionDefaultGpioPins[GpioInputPin](pinNumbers: _*)
+    }
 
-  def writeValue(pinNumber: Int, newValue: PinValue) = modify[GpioBoard] { gpioBoard =>
-    gpioBoard.writeValue(pinNumber, newValue)
-  }
+  def subscribeOneOffPinValueChangedEvent(pinNumber: Int, direction: Direction, eventOn: GpioBoardState) =
+    gets[GpioBoard, Unit] { gpioBoard =>
+      var subscription: Subscription = null
+      val handler: PartialFunction[DomainEvent, Unit] = {
+        case PinValueChangedEvent(`pinNumber`, `direction`, _) =>
+          subscription.unsubscribe()
+          eventOn.run(gpioBoard)
+        case _ =>
+      }
+      subscription = gpioBoard.domainPublisher.subscribe(handler)
+    }
 
-  def shutdown() = modify[GpioBoard] { gpioBoard =>
-    gpioBoard.shutdown()
-  }
+  def readValue(pinNumber: Int) =
+    gets[GpioBoard, Option[PinValue]] { gpioBoard =>
+      gpioBoard.readPinValue(pinNumber)
+    }
+
+  def writeValue(pinNumber: Int, newValue: PinValue) =
+    modify[GpioBoard] { gpioBoard =>
+      gpioBoard.writePinValue(pinNumber, newValue)
+    }
+
+  def shutdown() =
+    modify[GpioBoard] { gpioBoard =>
+      gpioBoard.shutdown()
+    }
 }

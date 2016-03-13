@@ -4,35 +4,35 @@ import java.nio.channels.SocketChannel
 import java.nio.{ByteBuffer, ByteOrder}
 
 import com.typesafe.scalalogging.StrictLogging
-import org.kaloz.rpio.reactive.domain.DomainApi
+import org.kaloz.rpio.reactive.domain.api
 import org.kaloz.rpio.reactive.domain.PinMode._
 import org.kaloz.rpio.reactive.domain.PinValue._
 import org.kaloz.rpio.reactive.domain.PudMode._
 import org.kaloz.rpio.reactive.infrastrucure.pigpiosocketchannel.InfrastructureApi.ChangeMode.ChangeModeRequest
 import org.kaloz.rpio.reactive.infrastrucure.pigpiosocketchannel.InfrastructureApi.ChangePud.ChangePudRequest
+import org.kaloz.rpio.reactive.infrastrucure.pigpiosocketchannel.InfrastructureApi.PiGpioVersion.PiGpioVersionRequest
 import org.kaloz.rpio.reactive.infrastrucure.pigpiosocketchannel.InfrastructureApi.ReadDigitalValue.ReadDigitalValueRequest
 import org.kaloz.rpio.reactive.infrastrucure.pigpiosocketchannel.InfrastructureApi.WriteDigitalValue.WriteDigitalValueRequest
 import org.kaloz.rpio.reactive.infrastrucure.pigpiosocketchannel.InfrastructureApi.WritePwmValue.WritePwmValueRequest
-import org.kaloz.rpio.reactive.infrastrucure.pigpiosocketchannel.InfrastructureApi.PiGpioVersion.PiGpioVersionRequest
 
 package object pigpiosocketchannel extends StrictLogging {
 
   object InfrastructureApi {
 
     object PiGpioSocketChannelRequest {
-      implicit def domainToInfrastructure(request: DomainApi.Request): PiGpioSocketChannelRequest = request match {
-        case DomainApi.ChangePinModeRequest(pinNumber, pinMode) => ChangeModeRequest(pinNumber, pinMode)
-        case DomainApi.ChangePudModeRequest(pinNumber, pudMode) => ChangePudRequest(pinNumber, pudMode)
-        case DomainApi.ReadValueRequest(pinNumber) => ReadDigitalValueRequest(pinNumber)
-        case DomainApi.WriteValueRequest(pinNumber, value) => value match {
+      implicit def domainToInfrastructure(request: api.DomainRequest): PiGpioSocketChannelRequest = request match {
+        case api.ChangePinModeRequest(pinNumber, pinMode) => ChangeModeRequest(pinNumber, pinMode)
+        case api.ChangePudModeRequest(pinNumber, pudMode) => ChangePudRequest(pinNumber, pudMode)
+        case api.ReadValueRequest(pinNumber) => ReadDigitalValueRequest(pinNumber)
+        case api.WriteValueRequest(pinNumber, value) => value match {
           case Low | High => WriteDigitalValueRequest(pinNumber, value)
           case dutyCycle@Pwm(_) => WritePwmValueRequest(pinNumber, dutyCycle)
         }
-        case DomainApi.VersionRequest() => PiGpioVersionRequest()
+        case api.VersionRequest() => PiGpioVersionRequest()
       }
     }
 
-    sealed trait PiGpioSocketChannelRequest extends DomainApi.Request {
+    sealed trait PiGpioSocketChannelRequest extends api.DomainRequest {
       type ResponseHandlerType <: ResponseHandler
 
       def command: Int
@@ -52,7 +52,7 @@ package object pigpiosocketchannel extends StrictLogging {
 
       def responseHandler: ResponseHandlerType
 
-      def domainResponse: SocketChannel => DomainApi.Response = responseHandler.response
+      def domainResponse: SocketChannel => api.DomainResponse = responseHandler.response
 
     }
 
@@ -68,7 +68,7 @@ package object pigpiosocketchannel extends StrictLogging {
 
       val fetchResponse: ByteBuffer => Int = byteBuffer => byteBuffer.asIntBuffer().get(3)
 
-      val convertResponse: Int => DomainApi.Response
+      val convertResponse: Int => api.DomainResponse
 
       def response = readResponse andThen fetchResponse andThen convertResponse
     }
@@ -89,7 +89,7 @@ package object pigpiosocketchannel extends StrictLogging {
       }
 
       case class ChangeModeResponseHandler() extends ResponseHandler {
-        val convertResponse: Int => DomainApi.ChangePinModeResponse = result => DomainApi.ChangePinModeResponse(result)
+        val convertResponse: Int => api.ChangePinModeResponse = result => api.ChangePinModeResponse(result)
       }
 
     }
@@ -110,7 +110,7 @@ package object pigpiosocketchannel extends StrictLogging {
       }
 
       case class ChangePudResponseHandler() extends ResponseHandler {
-        val convertResponse: Int => DomainApi.ChangePudModeResponse = result => DomainApi.ChangePudModeResponse(result)
+        val convertResponse: Int => api.ChangePudModeResponse = result => api.ChangePudModeResponse(result)
       }
 
     }
@@ -132,7 +132,7 @@ package object pigpiosocketchannel extends StrictLogging {
 
         import org.kaloz.rpio.reactive.infrastrucure.pigpiosocketchannel.PinValue.intToPinValue
 
-        val convertResponse: Int => DomainApi.ReadValueResponse = result => DomainApi.ReadValueResponse(result)
+        val convertResponse: Int => api.ReadValueResponse = result => api.ReadValueResponse(result)
       }
 
     }
@@ -153,7 +153,7 @@ package object pigpiosocketchannel extends StrictLogging {
       }
 
       case class WriteDigitalValueResponseHandler() extends ResponseHandler {
-        val convertResponse: Int => DomainApi.WriteValueResponse = result => DomainApi.WriteValueResponse(result)
+        val convertResponse: Int => api.WriteValueResponse = result => api.WriteValueResponse(result)
       }
 
     }
@@ -174,7 +174,7 @@ package object pigpiosocketchannel extends StrictLogging {
       }
 
       case class WritePwmResponseHandler() extends ResponseHandler {
-        val convertResponse: Int => DomainApi.WriteValueResponse = result => DomainApi.WriteValueResponse(result)
+        val convertResponse: Int => api.WriteValueResponse = result => api.WriteValueResponse(result)
       }
 
     }
@@ -194,7 +194,7 @@ package object pigpiosocketchannel extends StrictLogging {
 
       case class PiGpioVersionResponseHandler() extends ResponseHandler {
 
-        val convertResponse: Int => DomainApi.VersionResponse = result => DomainApi.VersionResponse(result)
+        val convertResponse: Int => api.VersionResponse = result => api.VersionResponse(result)
       }
 
     }
