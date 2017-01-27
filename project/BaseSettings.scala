@@ -8,7 +8,7 @@ object BaseSettings {
     Seq(
       organization := "org.kaloz.rpi.reactive",
       description := "Raspberry Reactive Library",
-      scalaVersion := "2.11.7",
+      scalaVersion := "2.12.1",
       crossPaths := false,
       homepage := Some(url("http://kaloz.org")),
       scalacOptions := Seq(

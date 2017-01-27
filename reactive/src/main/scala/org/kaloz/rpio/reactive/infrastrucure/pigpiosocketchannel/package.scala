@@ -76,7 +76,7 @@ package object pigpiosocketchannel extends StrictLogging {
     object ChangeMode {
 
       case class ChangeModeRequest(pinNumber: Int, value: PinMode) extends PiGpioSocketChannelRequest {
-        type ResponseHandlerType = ChangeModeResponseHandler
+        type ResponseHandlerType = ChangeModeResponseHandler.type
 
         import org.kaloz.rpio.reactive.infrastrucure.pigpiosocketchannel.PinMode.pinModeToInt
 
@@ -85,10 +85,10 @@ package object pigpiosocketchannel extends StrictLogging {
         val param2: Int = value
         val param3: Int = 0
 
-        val responseHandler = ChangeModeResponseHandler()
+        val responseHandler = ChangeModeResponseHandler
       }
 
-      case class ChangeModeResponseHandler() extends ResponseHandler {
+      case object ChangeModeResponseHandler extends ResponseHandler {
         val convertResponse: Int => api.ChangePinModeResponse = result => api.ChangePinModeResponse(result)
       }
 
