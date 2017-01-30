@@ -14,7 +14,7 @@ import org.kaloz.rpio.reactive.domain.GpioBoard._
 import org.kaloz.rpio.reactive.domain.PinValue._
 import org.kaloz.rpio.reactive.domain.PudMode._
 import org.kaloz.rpio.reactive.domain.service.DomainPublisher
-import org.kaloz.rpio.reactive.infrastrucure.pigpioakkastreams.{BR1, GpioRequest, MODES, NB, NC, NOIB, PUD, PWM, PiGpioAkkaStreamsClient, READ, WRITE}
+import org.kaloz.rpio.reactive.infrastrucure.pigpioakkastreams.{BR1, GpioRequest, HWVER, MODES, NB, NC, NOIB, PUD, PWM, PiGpioAkkaStreamsClient, WRITE}
 import org.kaloz.rpio.reactive.infrastrucure.pigpiosocketchannel.PiGpioSocketChannel
 
 object Test extends App with StrictLogging {
@@ -70,11 +70,10 @@ object Akka extends App with StrictLogging {
 
   val read = for {
     notify <- EitherT(client.sendReceive(GpioRequest(NOIB)))
-    _ <- EitherT(client.sendReceive(GpioRequest(BR1)))
-    _ <- EitherT(client.sendReceive(GpioRequest(NB, Some(notify.result), Some(1 << 25))))
+    br1 <- EitherT(client.sendReceive(GpioRequest(BR1)))
+    _ <- EitherT(client.sendReceive(GpioRequest(NB, Some(notify.p3), Some(1 << 25))))
     _ <- EitherT(client.sendReceive(GpioRequest(MODES, Some(17), Some(1))))
     _ <- EitherT(client.sendReceive(GpioRequest(PUD, Some(17), Some(2))))
-    _ <- EitherT(client.sendReceive(GpioRequest(MODES, Some(25), Some(0))))
     _ <- EitherT(client.sendReceive(GpioRequest(MODES, Some(25), Some(0))))
     _ <- EitherT(client.sendReceive(GpioRequest(WRITE, Some(25), Some(0))))
     _ <- EitherT(client.sendReceive(GpioRequest(MODES, Some(16), Some(0))))
@@ -86,14 +85,20 @@ object Akka extends App with StrictLogging {
     _ <- EitherT(client.sendReceive(GpioRequest(WRITE, Some(25), Some(1))))
     _ <- EitherT(client.sendReceive(GpioRequest(WRITE, Some(16), Some(0))))
     _ <- EitherT(client.sendReceive(GpioRequest(PWM, Some(12), Some(100))))
-  } yield notify
+  } yield (notify.p3, br1)
 
-  val t = for {
-    notify <- read
-    value <- EitherT(client.sendReceive(GpioRequest(READ, Some(25))))
+  for {
+    r <- read
+    (notify, br1) = r
+    value <- EitherT(client.sendReceive(GpioRequest(HWVER)))
     _ <- EitherT(client.sendReceive(GpioRequest(WRITE, Some(25), Some(0))))
-    _ <- EitherT(client.sendReceive(GpioRequest(NC, Some(notify.result))))
-  } yield {println(value)}
+    _ <- EitherT(client.sendReceive(GpioRequest(NC, Some(notify))))
+  } yield println(s"$value - $br1")
+
+
+  client.sendReceive(GpioRequest(MODES, Some(25), Some(0))).onComplete(r => println(s"1 - $r"))
+  client.sendReceive(GpioRequest(WRITE, Some(25), Some(1))).onComplete(r => println(s"2 - $r"))
+  client.sendReceive(GpioRequest(MODES, Some(16), Some(0))).onComplete(r => println(s"3 - $r"))
 
   //  Thread.sleep(10)
   //

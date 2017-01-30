@@ -13,27 +13,31 @@ package object pigpioakkastreams {
 
   type GpioRespone = Future[Either[NonEmptyList[String], GpioResponse]]
 
+  sealed trait Notification
+
+  sealed trait NoResult
+
   sealed trait Command
 
-  case object MODES extends Command
+  case object MODES extends Command with NoResult
 
-  case object PUD extends Command
+  case object PUD extends Command with NoResult
 
   case object READ extends Command
 
-  case object WRITE extends Command
+  case object WRITE extends Command with NoResult
 
-  case object PWM extends Command
+  case object PWM extends Command with NoResult
 
-  case object WDOG extends Command
+  case object WDOG extends Command with NoResult
 
   case object BR1 extends Command
 
-  case object NB extends Command
+  case object NB extends Command with Notification with NoResult
 
-  case object NC extends Command
+  case object NC extends Command with Notification with NoResult
 
-  case object NOIB extends Command
+  case object NOIB extends Command with Notification
 
   case object HWVER extends Command
 
@@ -55,7 +59,7 @@ package object pigpioakkastreams {
     )
   }
 
-  case class GpioRequest(command: Command, p1: Option[Int] = None, p2: Option[Int] = None)
+  case class GpioRequest(command: Command, p1: Option[Int] = Some(0), p2: Option[Int] = Some(0))
 
   object GpioRequest {
     implicit val codec: Codec[GpioRequest] = fixedSizeBytes(16, {
@@ -71,14 +75,15 @@ package object pigpioakkastreams {
 
   object Protocol {
 
-    case class GpioResponse(commandId: Command, result: Int) extends Protocol
+    case class GpioResponse(command: Command, p1: Option[Int] = Some(0), p2: Option[Int] = Some(0), p3: Int) extends Protocol
 
     object GpioResponse {
       val decoder: Decoder[GpioResponse] = fixedSizeBytes(16, {
         (("command" | Codec[Command]) <~
           ("fillers" | constant(BitVector.fill(24)(false)))) ::
-          ("ignore" | ignore(64)) :~>:
-          ("result" | int32L)
+          ("p1" | conditional(true, int32L)) ::
+          ("p2" | conditional(true, int32L)) ::
+          ("p3" | int32L)
       }).as[GpioResponse]
     }
 
@@ -120,12 +125,14 @@ package object pigpioakkastreams {
     object NotificationResponse {
       val codec: Codec[NotificationResponse] = fixedSizeBytes(12, {
         ("seq" | ignore(16)) ~>
-          ("type" | Codec[NotificationType])  >>:~ { nType =>
+          ("type" | Codec[NotificationType]) >>:~ { nType =>
           ("tick" | ignore(32)) :~>:
             ("level" | conditional(nType.isInstanceOf[Change.type], int32L))
-        }}).as[NotificationResponse]
+        }
+      }).as[NotificationResponse]
     }
 
     val decoder: Decoder[Protocol] = Decoder.choiceDecoder(GpioResponse.decoder, NotificationResponse.codec.asDecoder)
   }
+
 }
