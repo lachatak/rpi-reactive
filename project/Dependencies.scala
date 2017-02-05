@@ -38,6 +38,8 @@ object Library {
   val scodecCore      = "org.scodec"                 %% "scodec-core"                   % "1.10.3"
   val scodeAkka       = "org.scodec"                 %% "scodec-akka"                   % "0.3.0"
   val cats            = "org.typelevel"              %% "cats"                          % "0.9.0"
+  val monixEval       = "io.monix"                   %% "monix-eval"                    % "2.2.1"
+  val monixCats       = "io.monix"                   %% "monix-cats"                    % "2.2.1"
 }
 
 object Dependencies {
@@ -53,6 +55,8 @@ object Dependencies {
     scodecCore,
     scodeAkka,
     cats,
+    monixEval,
+    monixCats,
 //    scalaAsync,
     scalarx,
     config,

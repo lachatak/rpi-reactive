@@ -1,19 +1,19 @@
 package org.kaloz.rpio.reactive
 
+import cats.data.{Kleisli, NonEmptyList}
 import org.kaloz.rpio.reactive.domain.Direction._
 import org.kaloz.rpio.reactive.domain.PinMode._
 import org.kaloz.rpio.reactive.domain.PinValue._
 import org.kaloz.rpio.reactive.domain.PudMode._
 import rx.lang.scala.Subscription
-
-import scalaz._
+import monix.eval.Task
 
 package object domain {
 
   object api {
 
-    type Valid[A] = Throwable \/ A
-    type PinOperation[A] = Kleisli[Valid, SendReceiveHandler, A]
+    type Valid[B] = Task[Either[NonEmptyList[String], B]]
+    type PinOperation[B] = Kleisli[Valid, SendReceiveHandler, B]
 
     trait DomainRequest
 
@@ -22,29 +22,18 @@ package object domain {
     trait DomainEvent
 
     trait SendReceiveHandler {
-      def sendReceive[A <: DomainResponse](request: DomainRequest): Valid[A]
-    }
-
-    trait Subscription {
-      def unsubscribe()
-    }
-
-    trait DomainPublisher {
-
-      def subscribe(eventOn: PartialFunction[DomainEvent, Unit]): Subscription
-
-      def publish(event: DomainEvent)
+      def sendReceive[A <: DomainRequest, B <: DomainResponse](request: A): Valid[B]
     }
 
     trait PinManipulationService {
 
-      def changePinMode(request: ChangePinModeRequest): PinOperation[ChangePinModeResponse]
+      def changePinMode(request: ChangePinModeRequest): PinOperation[SuccessFulEmptyResponse]
 
-      def changePudMode(request: ChangePudModeRequest): PinOperation[ChangePudModeResponse]
+      def changePudMode(request: ChangePudModeRequest): PinOperation[SuccessFulEmptyResponse]
 
       def readValue(request: ReadValueRequest): PinOperation[ReadValueResponse]
 
-      def writeValue(request: WriteValueRequest): PinOperation[WriteValueResponse]
+      def writeValue(request: WriteValueRequest): PinOperation[SuccessFulEmptyResponse]
 
       def version(request: VersionRequest): PinOperation[VersionResponse]
 
@@ -52,23 +41,31 @@ package object domain {
 
     case class ChangePinModeRequest(pinNumber: Int, pinMode: PinMode) extends DomainRequest
 
-    case class ChangePinModeResponse(result: Int) extends DomainResponse
-
     case class ChangePudModeRequest(pinNumber: Int, pudMode: PudMode) extends DomainRequest
-
-    case class ChangePudModeResponse(result: Int) extends DomainResponse
 
     case class ReadValueRequest(pinNumber: Int) extends DomainRequest
 
     case class ReadValueResponse(value: PinValue) extends DomainResponse
 
-    case class WriteValueRequest(pinNumber: Int, value: PinValue) extends DomainRequest
+    case class ReadAllPinValuesRequest() extends DomainRequest
 
-    case class WriteValueResponse(result: Int) extends DomainResponse
+    case class ReadAllPinValuesResponse(pinValues:Int) extends DomainResponse
+
+    case class OpenNotificationChannelRequest() extends DomainRequest
+
+    case class OpenNotificationChannelResponse(handler: Int) extends DomainResponse
+
+    case class SubscribeNotificationRequest(pin: Int, handler: Int) extends DomainRequest
+
+    case class CloseNotificationChannelRequest() extends DomainRequest
+
+    case class WriteValueRequest(pinNumber: Int, value: PinValue) extends DomainRequest
 
     case class VersionRequest() extends DomainRequest
 
     case class VersionResponse(version: Int) extends DomainResponse
+
+    case class SuccessFulEmptyResponse() extends DomainResponse
 
     case class PinProvisionedEvent(pinNumber: Int, pinMode: PinMode) extends DomainEvent
 
