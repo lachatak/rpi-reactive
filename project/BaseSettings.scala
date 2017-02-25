@@ -18,7 +18,8 @@ object BaseSettings {
         "-deprecation",
         "-target:jvm-1.8",
         "-language:postfixOps",
-        "-language:implicitConversions"
+        "-language:implicitConversions",
+        "-Ypartial-unification"
       ),
       javacOptions := Seq(
         "-Xlint:unchecked",

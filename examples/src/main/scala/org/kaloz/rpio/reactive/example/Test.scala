@@ -1,29 +1,19 @@
 package org.kaloz.rpio.reactive.example
 
-//import java.util.concurrent.CountDownLatch
-
 import akka.actor.ActorSystem
 import akka.stream.ActorMaterializer
 import akka.stream.scaladsl.Source
-import cats.data.{EitherT, NonEmptyList}
+import cats.data.EitherT
 import com.typesafe.scalalogging.StrictLogging
 import monix.eval.Task
-//import monix.eval.Task
-//import org.kaloz.rpio.reactive.domain.Direction._
-//import org.kaloz.rpio.reactive.domain.PinValue
-import org.kaloz.rpio.reactive.domain.api.{OpenNotificationChannelRequest, OpenNotificationChannelResponse, ReadAllPinValuesRequest, ReadAllPinValuesResponse}
-import org.kaloz.rpio.reactive.infrastrucure.pigpioakkastreams.PiGpioService
-//import org.kaloz.rpio.reactive.domain.GpioBoard
-//import org.kaloz.rpio.reactive.domain.GpioBoard._
-//import org.kaloz.rpio.reactive.domain.PinValue._
-//import org.kaloz.rpio.reactive.domain.PudMode._
-//import org.kaloz.rpio.reactive.domain.service.DomainPublisher
+import org.kaloz.rpio.reactive.domain.GpioPin.PinNumber
+import org.kaloz.rpio.reactive.domain.PinValue.Pwm
+import org.kaloz.rpio.reactive.domain.api.{ChangePinModeRequest, ChangePudModeRequest, CloseNotificationChannelRequest, SubscribeNotificationRequest, VersionRequest, WriteValueRequest}
+import org.kaloz.rpio.reactive.domain.{PinMode, PinValue, PudMode}
+import org.kaloz.rpio.reactive.domain.api.{OpenNotificationChannelRequest, ReadAllPinValuesRequest}
+import org.kaloz.rpio.reactive.infrastrucure.pigpioakkastreams.{GpioAssembler, PiGpioAkkaStreamsClient, PiGpioAkkaStreamsSendReceiver}
 import monix.execution.Scheduler.Implicits.global
-import monix.cats._
-//import scala.concurrent.ExecutionContext.Implicits.global
-import scala.concurrent.duration._
-
-import org.kaloz.rpio.reactive.infrastrucure.pigpioakkastreams.PiGpioAkkaStreamsClient
+import monix.cats.monixToCatsMonad
 
 //object Test extends App with StrictLogging {
 //
@@ -70,46 +60,48 @@ object Akka extends App with StrictLogging {
 
   private implicit val system = ActorSystem("pigpio-client")
   private implicit val mater = ActorMaterializer()
-//  private implicit val executionContext = system.dispatcher
 
   val client = PiGpioAkkaStreamsClient()
-  val server = PiGpioService(client)
+  val service = PiGpioAkkaStreamsSendReceiver(client)
 
   Source.fromPublisher(client.gpioNotificationResponsePublisher).runForeach(println)
 
+  import org.kaloz.rpio.reactive.infrastrucure.pigpioakkastreams.GpioAssembler._
+
   println("start")
   val read = for {
-    notify <- TaskService[OpenNotificationChannelResponse](server.sendReceive(OpenNotificationChannelRequest()))
-    br1 <- TaskService[ReadAllPinValuesResponse](server.sendReceive(ReadAllPinValuesRequest()))
-  //    _ <- EitherT(client.sendReceive(GpioRequest(NB, Some(notify.p3), Some(1 << 25))))
-  //    _ <- EitherT(client.sendReceive(GpioRequest(MODES, Some(17), Some(1))))
-  //    _ <- EitherT(client.sendReceive(GpioRequest(PUD, Some(17), Some(2))))
-  //    _ <- EitherT(client.sendReceive(GpioRequest(MODES, Some(25), Some(0))))
-  //    _ <- EitherT(client.sendReceive(GpioRequest(WRITE, Some(25), Some(0))))
-  //    _ <- EitherT(client.sendReceive(GpioRequest(MODES, Some(16), Some(0))))
-  //    _ <- EitherT(client.sendReceive(GpioRequest(WRITE, Some(16), Some(0))))
-  //    _ <- EitherT(client.sendReceive(GpioRequest(MODES, Some(21), Some(0))))
-  //    _ <- EitherT(client.sendReceive(GpioRequest(WRITE, Some(21), Some(0))))
-  //    _ <- EitherT(client.sendReceive(GpioRequest(MODES, Some(12), Some(0))))
-  //    _ <- EitherT(client.sendReceive(GpioRequest(PWM, Some(12), Some(0))))
-  //    _ <- EitherT(client.sendReceive(GpioRequest(WRITE, Some(25), Some(1))))
-  //    _ <- EitherT(client.sendReceive(GpioRequest(WRITE, Some(16), Some(0))))
-  //    _ <- EitherT(client.sendReceive(GpioRequest(PWM, Some(12), Some(100))))
+    notify <- TaskService(service.sendReceive(OpenNotificationChannelRequest()))
+    br1 <- TaskService(service.sendReceive(ReadAllPinValuesRequest()))
+      _ <- TaskService(service.sendReceive(SubscribeNotificationRequest(PinNumber(25), notify.handler)))
+      _ <- TaskService(service.sendReceive(ChangePinModeRequest(PinNumber(17), PinMode.Input)))
+      _ <- TaskService(service.sendReceive(ChangePudModeRequest(PinNumber(17), PudMode.PudUp)))
+      _ <- TaskService(service.sendReceive(ChangePinModeRequest(PinNumber(25), PinMode.Output)))
+      _ <- TaskService(service.sendReceive(WriteValueRequest(PinNumber(25), PinValue.Low)))
+      _ <- TaskService(service.sendReceive(ChangePinModeRequest(PinNumber(16), PinMode.Output)))
+      _ <- TaskService(service.sendReceive(WriteValueRequest(PinNumber(16), PinValue.Low)))
+      _ <- TaskService(service.sendReceive(ChangePinModeRequest(PinNumber(21), PinMode.Output)))
+      _ <- TaskService(service.sendReceive(WriteValueRequest(PinNumber(21), PinValue.Low)))
+      _ <- TaskService(service.sendReceive(ChangePinModeRequest(PinNumber(12), PinMode.Output)))
+      _ <- TaskService(service.sendReceive(WriteValueRequest(PinNumber(12), Pwm(0))))
+      _ <- TaskService(service.sendReceive(WriteValueRequest(PinNumber(25), PinValue.High)))
+      _ <- TaskService(service.sendReceive(WriteValueRequest(PinNumber(16), PinValue.Low)))
+      _ <- TaskService(service.sendReceive(WriteValueRequest(PinNumber(12), Pwm(100))))
   } yield (notify, br1)
 
-  read.value.runAsync.foreach(println)
-  //  for {
-  //    r <- read
-  //    (notify, br1) = r
-  //    value <- EitherT(client.sendReceive(GpioRequest(HWVER)))
-  //    _ <- EitherT(client.sendReceive(GpioRequest(WRITE, Some(25), Some(0))))
-  //    _ <- EitherT(client.sendReceive(GpioRequest(NC, Some(notify))))
-  //  } yield println(s"$value - $br1")
-  //
-  //
-  //  client.sendReceive(GpioRequest(MODES, Some(25), Some(0))).onComplete(r => println(s"1 - $r"))
-  //  client.sendReceive(GpioRequest(WRITE, Some(25), Some(1))).onComplete(r => println(s"2 - $r"))
-  //  client.sendReceive(GpioRequest(MODES, Some(16), Some(0))).onComplete(r => println(s"3 - $r"))
+    val read2 = for {
+      r <- read
+      (notify, br1) = r
+      value <- TaskService(service.sendReceive(VersionRequest()))
+      _ <- TaskService(service.sendReceive(WriteValueRequest(PinNumber(25), PinValue.Low)))
+      _ <- TaskService(service.sendReceive(CloseNotificationChannelRequest(notify.handler)))
+    } yield s"$value - $br1"
+
+  read2.value.runAsync.foreach(println)
+
+
+  service.sendReceive(ChangePinModeRequest(PinNumber(25), PinMode.Output)).runAsync.onComplete(r => println(s"1 - $r"))
+  service.sendReceive(WriteValueRequest(PinNumber(25), PinValue.High)).runAsync.onComplete(r => println(s"2 - $r"))
+  service.sendReceive(ChangePinModeRequest(PinNumber(16), PinMode.Output)).runAsync.onComplete(r => println(s"3 - $r"))
 
   //  Thread.sleep(10)
   //
@@ -132,18 +124,18 @@ object Akka extends App with StrictLogging {
 
 }
 
-
-//import scala.language.{higherKinds, implicitConversions}
-
 object TaskService {
 
-  type TaskService[A] = EitherT[Task, NonEmptyList[String], A]
+  type TaskService[A] = EitherT[Task, String, A]
 
-  def apply[A](f: Task[NonEmptyList[String] Either A]): TaskService[A] = {
-    EitherT[Task, NonEmptyList[String], A](f)
+  def apply[A](f: Task[String Either A]): TaskService[A] = {
+    EitherT[Task, String, A](f)
   }
 
+
 }
+
+
 
 
 

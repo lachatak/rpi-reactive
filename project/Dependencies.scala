@@ -40,6 +40,9 @@ object Library {
   val cats            = "org.typelevel"              %% "cats"                          % "0.9.0"
   val monixEval       = "io.monix"                   %% "monix-eval"                    % "2.2.1"
   val monixCats       = "io.monix"                   %% "monix-cats"                    % "2.2.1"
+  val eff             = "org.atnos"                  %% "eff"                           % "2.3.0"
+  val effMonix        = "org.atnos"                  %% "eff-monix"                     % "2.3.0"
+  val kindProjector   = "org.spire-math"             %% "kind-projector"                % "0.9.3"
 }
 
 object Dependencies {
@@ -57,6 +60,8 @@ object Dependencies {
     cats,
     monixEval,
     monixCats,
+    eff,
+    effMonix,
 //    scalaAsync,
     scalarx,
     config,
@@ -66,7 +71,7 @@ object Dependencies {
     mockito       	% "test",
     akkaTestkit     % "test",
     scalaTest     	% "test"
-  )
+  ) ++ addCompilerPlugin(kindProjector)
 
   val examples = deps(
     akkaActor,

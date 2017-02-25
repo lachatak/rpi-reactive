@@ -1,25 +1,29 @@
 package org.kaloz.rpio.reactive.domain.service
 
+import cats.data.Kleisli
 import com.typesafe.scalalogging.StrictLogging
 import org.kaloz.rpio.reactive.domain.Direction._
 import org.kaloz.rpio.reactive.domain.GpioPin._
+import org.kaloz.rpio.reactive.domain.PinMode.PinMode
 import org.kaloz.rpio.reactive.domain.PinValue._
 import org.kaloz.rpio.reactive.domain.PudMode._
 import org.kaloz.rpio.reactive.domain._
 import org.kaloz.rpio.reactive.domain.api._
+import org.kaloz.rpio.reactive.infrastrucure.pigpioakkastreams.ResponseProtocol.GpioResponse
+import org.kaloz.rpio.reactive.infrastrucure.pigpioakkastreams.{GpioAssembler, GpioRequest}
 import rx.lang.scala.{Observable, Subscription}
 
 import scala.concurrent.duration.FiniteDuration
-import scalaz.Kleisli._
-import scalaz.Scalaz._
-import scalaz._
+import cats.implicits._
 
-//trait PinManipulationServiceImpl extends PinManipulationService with StrictLogging {
-//
-//  def changePinMode(request: ChangePinModeRequest): PinOperation[ChangePinModeResponse] = kleisli[Valid, SendReceiveHandler, ChangePinModeResponse] { (protocolHandler: SendReceiveHandler) =>
-//    protocolHandler.sendReceive[ChangePinModeResponse](request)
-//  }
-//
+abstract class PinManipulationServiceImpl extends PinManipulationService with StrictLogging {
+
+  private def sendReceive[A <: DomainRequest, R](request: A)(implicit mapper: Mapper.Aux[A, R]) = Kleisli[Valid, SendReceiver, R] { (protocolHandler: SendReceiver) =>
+    protocolHandler.sendReceive(request)
+  }
+
+  def changePinMode(pinNumber: PinNumber, pinMode: PinMode):PinOperation[Unit] = sendReceive(ChangePinModeRequest(pinNumber, pinMode))
+
 //  def changePudMode(request: ChangePudModeRequest): PinOperation[ChangePudModeResponse] = kleisli[Valid, SendReceiveHandler, ChangePudModeResponse] { (protocolHandler: SendReceiveHandler) =>
 //    protocolHandler.sendReceive[ChangePudModeResponse](request)
 //  }
@@ -35,8 +39,8 @@ import scalaz._
 //  def version(request: VersionRequest): PinOperation[VersionResponse] = kleisli[Valid, SendReceiveHandler, VersionResponse] { (protocolHandler: SendReceiveHandler) =>
 //    protocolHandler.sendReceive[VersionResponse](request)
 //  }
-//}
-//
+}
+
 //trait OutputPinManipulationServiceImpl extends PinManipulationServiceImpl {
 //
 //  def outputPin(pinNumber: Int, value: PinValue = PinValue.Low, defaultValue: PinValue = PinValue.Low): PinOperation[GpioOutputPin] =
@@ -114,6 +118,6 @@ import scalaz._
 //    }
 //  }
 //}
-//
+
 //object PinManipulationService extends InputPinManipulationServiceImpl with OutputPinManipulationServiceImpl
-//
+

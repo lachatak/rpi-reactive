@@ -1,10 +1,10 @@
 package org.kaloz.rpio.reactive.infrastrucure
 
-import cats.data.NonEmptyList
+import org.kaloz.rpio.reactive.domain.ChannelHandler
 import org.kaloz.rpio.reactive.domain.PinMode.{Input, Output, PinMode}
 import org.kaloz.rpio.reactive.domain.PinValue.{High, Low, PinValue, Pwm}
 import org.kaloz.rpio.reactive.domain.PudMode.{PudDown, PudMode, PudOff, PudUp}
-import org.kaloz.rpio.reactive.domain.api.{ChangePinModeRequest, ChangePudModeRequest, CloseNotificationChannelRequest, DomainRequest, DomainResponse, OpenNotificationChannelRequest, OpenNotificationChannelResponse, ReadAllPinValuesRequest, ReadAllPinValuesResponse, ReadValueRequest, ReadValueResponse, SubscribeNotificationRequest, SuccessFulEmptyResponse, VersionRequest, VersionResponse, WriteValueRequest}
+import org.kaloz.rpio.reactive.domain.api.{ChangePinModeRequest, ChangePudModeRequest, CloseNotificationChannelRequest, DomainRequest, OpenNotificationChannelRequest, OpenNotificationChannelResponse, ReadAllPinValuesRequest, ReadAllPinValuesResponse, ReadValueRequest, ReadValueResponse, SubscribeNotificationRequest, VersionRequest, VersionResponse, WriteValueRequest}
 import org.kaloz.rpio.reactive.infrastrucure.pigpioakkastreams.ResponseProtocol.GpioResponse
 import org.kaloz.rpio.reactive.infrastrucure.pigpioakkastreams.ResponseProtocol.NotificationType.Change
 import scodec.bits.{BitVector, _}
@@ -137,51 +137,93 @@ package object pigpioakkastreams {
     val decoder: Decoder[ResponseProtocol] = Decoder.choiceDecoder(GpioResponse.decoder, NotificationResponse.codec.asDecoder)
   }
 
-  def domainToInfrastructureAssembler(request: DomainRequest): GpioRequest = request match {
-    case ChangePinModeRequest(pinNumber, pinMode) =>
-      import org.kaloz.rpio.reactive.infrastrucure.pigpioakkastreams.PinMode.pinModeToInt
-      GpioRequest(MODES, pinNumber, pinMode)
 
-    case ChangePudModeRequest(pinNumber, pudMode) =>
-      import org.kaloz.rpio.reactive.infrastrucure.pigpioakkastreams.PudMode.pudModeToInt
-      GpioRequest(PUD, pinNumber, pudMode)
+  trait GpioAssembler[A <: DomainRequest, R] {
 
-    case ReadValueRequest(pinNumber) => GpioRequest(READ, pinNumber)
-
-    case WriteValueRequest(pinNumber, value) => value match {
-      case Low | High => GpioRequest(WRITE, pinNumber, value)
-      case dutyCycle@Pwm(_) => GpioRequest(PWM, pinNumber, dutyCycle)
+    protected def defaultResponse(response: GpioResponse) = response.p3 match {
+      case 0 => Right(())
+      case _ => Left(s"Error processing request $response")
     }
 
-    case ReadAllPinValuesRequest() => GpioRequest(BR1)
+    def disassemble(request: A): GpioRequest
 
-    case OpenNotificationChannelRequest() => GpioRequest(NOIB)
-
-    case SubscribeNotificationRequest(pin, handler) => GpioRequest(NB, handler, 1 << pin)
-
-    case CloseNotificationChannelRequest() => GpioRequest(NC)
-
-    case VersionRequest() => GpioRequest(HWVER)
+    def assemble(response: GpioResponse): Either[String, R]
   }
 
-  def infrastructureToDomainAssembler(response: GpioResponse): Either[NonEmptyList[String], DomainResponse] = {
-    val defaultResponse = response.p3 match {
-      case 0 => Right(SuccessFulEmptyResponse())
-      case _ => Left(NonEmptyList.of(s"Error processing request $response"))
+  object GpioAssembler {
+
+    def apply[A0 <: DomainRequest, R0](implicit assembler: GpioAssembler[A0, R0]) = assembler
+
+    implicit val changePinModeRequestAssembler = new GpioAssembler[ChangePinModeRequest, Unit] {
+
+      override def disassemble(out: ChangePinModeRequest): GpioRequest = {
+        import org.kaloz.rpio.reactive.infrastrucure.pigpioakkastreams.PinMode.pinModeToInt
+        GpioRequest(MODES, out.pinNumber.id, out.pinMode)
+      }
+
+      override def assemble(in: GpioResponse): Either[String, Unit] = defaultResponse(in)
     }
 
-    response.command match {
-      case MODES => defaultResponse
-      case PUD => defaultResponse
-      case READ => Right(ReadValueResponse(response.p3))
-      case WRITE => defaultResponse
-      case PWM => defaultResponse
-      case WDOG => defaultResponse
-      case BR1 => Right(ReadAllPinValuesResponse(response.p3))
-      case HWVER => Right(VersionResponse(response.p3))
-      case NB => defaultResponse
-      case NC => defaultResponse
-      case NOIB => Right(OpenNotificationChannelResponse(response.p3))
+    implicit val changePudModeRequestAssembler = new GpioAssembler[ChangePudModeRequest, Unit] {
+
+      override def disassemble(out: ChangePudModeRequest): GpioRequest = {
+        import org.kaloz.rpio.reactive.infrastrucure.pigpioakkastreams.PudMode.pudModeToInt
+        GpioRequest(PUD, out.pinNumber.id, out.pudMode)
+      }
+
+      override def assemble(in: GpioResponse): Either[String, Unit] = defaultResponse(in)
+    }
+
+    implicit val readValueRequestAssembler = new GpioAssembler[ReadValueRequest, ReadValueResponse] {
+
+      override def disassemble(out: ReadValueRequest): GpioRequest = GpioRequest(READ, out.pinNumber.id)
+
+      override def assemble(in: GpioResponse): Either[String, ReadValueResponse] = Right(ReadValueResponse(in.p3))
+    }
+
+    implicit val writeValueRequestAssembler = new GpioAssembler[WriteValueRequest, Unit] {
+
+      override def disassemble(out: WriteValueRequest): GpioRequest = out.value match {
+        case Low | High => GpioRequest(WRITE, out.pinNumber.id, out.value)
+        case dutyCycle@Pwm(_) => GpioRequest(PWM, out.pinNumber.id, dutyCycle)
+      }
+
+      override def assemble(in: GpioResponse): Either[String, Unit] = defaultResponse(in)
+    }
+
+    implicit val readAllPinValuesRequestAssembler = new GpioAssembler[ReadAllPinValuesRequest, ReadAllPinValuesResponse] {
+
+      override def disassemble(out: ReadAllPinValuesRequest): GpioRequest = GpioRequest(BR1)
+
+      override def assemble(in: GpioResponse): Either[String, ReadAllPinValuesResponse] = Right(ReadAllPinValuesResponse(in.p3))
+    }
+
+    implicit val subscribeNotificationRequestAssembler = new GpioAssembler[SubscribeNotificationRequest, Unit] {
+
+      override def disassemble(out: SubscribeNotificationRequest): GpioRequest = GpioRequest(NB, out.handler.id, 1 << out.pin.id)
+
+      override def assemble(in: GpioResponse): Either[String, Unit] = defaultResponse(in)
+    }
+
+    implicit val closeNotificationChannelRequestAssembler = new GpioAssembler[CloseNotificationChannelRequest, Unit] {
+
+      override def disassemble(out: CloseNotificationChannelRequest): GpioRequest = GpioRequest(NC, out.handler.id)
+
+      override def assemble(in: GpioResponse): Either[String, Unit] = defaultResponse(in)
+    }
+
+    implicit val openNotificationChannelRequestAssembler = new GpioAssembler[OpenNotificationChannelRequest, OpenNotificationChannelResponse] {
+
+      override def disassemble(out: OpenNotificationChannelRequest): GpioRequest = GpioRequest(NOIB)
+
+      override def assemble(in: GpioResponse): Either[String, OpenNotificationChannelResponse] = Right(OpenNotificationChannelResponse(ChannelHandler(in.p3)))
+    }
+
+    implicit val versionRequestAssembler = new GpioAssembler[VersionRequest, VersionResponse] {
+
+      override def disassemble(out: VersionRequest): GpioRequest = GpioRequest(HWVER)
+
+      override def assemble(in: GpioResponse): Either[String, VersionResponse] = Right(VersionResponse(in.p3))
     }
   }
 
